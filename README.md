@@ -165,7 +165,7 @@ Feedback comes in three steps, so it is quick but nothing heavy runs on every ke
 |---|---|---|---|
 | 350 ms after an edit | Field validation, generated Terraform, diagram | `POST /architectures/preview` | instant |
 | 2 s after you stop editing | Static check: `terraform plan`, OPA, graph diff, Infracost | `POST /architectures/check` | about 30 s |
-| You press **Certify** | Full pipeline including the MiniStack shadow apply; signs the result and saves it to the Certificates page | `POST /architectures/analyze` | 1 to 2 min |
+| You press **Certify** | Full pipeline including the MiniStack shadow apply; signs the result and saves it to the Certificates page | `POST /architectures/certify` (background job, polled) | 1 to 2 min, longer for big designs |
 
 The static result reads **WOULD BE BLOCKED** or **WOULD BE AUTO-APPROVED** and is never
 signed. If you edit after a result, it is marked out of date until the next check.
@@ -332,7 +332,9 @@ Exit code 0 = auto-approved, 1 = blocked, 2 = error. The same works through the 
 | `GET /catalog` | Services, fields, defaults, usage inputs, pricing notes |
 | `POST /architectures/preview` | Validate an architecture and return the generated Terraform |
 | `POST /architectures/check` | Static check (no MiniStack, not signed, not stored) |
-| `POST /architectures/analyze` | Full pipeline; stores and returns a signed certificate |
+| `POST /architectures/certify` | Starts the full pipeline as a background job (202); the same design while running returns the same job |
+| `GET /jobs/{job_id}` | Job status: queued (with queue position), running, done (plan id and verdict) or error |
+| `POST /architectures/analyze` | Full pipeline in one request; stores and returns a signed certificate (CLI and scripts) |
 | `POST /analyze` | Analyse a `terraform show -json` plan |
 | `GET /demos`, `POST /analyze/demo/{name}` | Run the bundled demos |
 | `GET /certificates`, `GET /certificates/{id}` | List or fetch certificates |

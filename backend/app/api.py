@@ -22,6 +22,8 @@ GET  /comparisons                     compare slots A and B: both saved designs,
 PUT  /comparisons/{A|B}               same body as /architectures/check: runs the static check
                                       and saves architecture + result snapshot in that slot
 DELETE /comparisons/{A|B}             empty a slot
+POST /architectures/certify           same body -> starts the full analysis as a background job (202)
+GET  /jobs/{job_id}                   job status: queued | running | done (plan_id, verdict) | error
 GET  /health
 
 CORS allows the dashboard at http://localhost:3000 plus any origins listed in
@@ -51,6 +53,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.architecture import analyze_architecture, check_architecture, services_with_resources
 from app.catalog import catalog
 from app.compare import comparison, snapshot
+from app.jobs import JobManager
 from app.shadow import ShadowError
 from app.certificate import CertificateError, build_certificate, verify
 from app.generator import ArchitectureError, generate
@@ -130,6 +133,7 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
     async def lifespan(_app: FastAPI):
         install_secret_filter()
         yield
+        _app.state.jobs.shutdown()
 
     app = FastAPI(title="GhostOps", version="0.7.0", lifespan=lifespan)
     is_hosted = hosted()
@@ -232,6 +236,42 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
             return await run_in_threadpool(architecture_checker, body)
         except ShadowError as exc:
             raise HTTPException(500, f"could not plan the generated Terraform: {exc}") from None
+
+    def _certify(body: dict[str, Any]) -> dict[str, Any]:
+        cert = architecture_analyzer(body, use_groq=True)
+        app.state.store.save_certificate(cert)
+        log.info("certified architecture plan %s verdict=%s", cert["plan_id"], cert["verdict"])
+        return cert
+
+    def _job_error(exc: Exception) -> str:
+        if isinstance(exc, ShadowError):
+            return f"could not plan the generated Terraform: {exc}"
+        if isinstance(exc, CertificateError):
+            return str(exc)
+        log.exception("certify job crashed", exc_info=exc)
+        return f"Certify failed unexpectedly ({type(exc).__name__}); see the API log."
+
+    app.state.jobs = JobManager(_certify, _job_error)
+
+    @app.post("/architectures/certify", status_code=202)
+    async def certify_architecture(request: Request) -> dict[str, Any]:
+        """Start a full analysis as a background job; poll GET /jobs/{job_id} for the result."""
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(422, "body must be JSON: {\"services\": [...]}") from None
+        try:
+            generate(body)  # invalid input is a 422 now, not a failed job later
+        except ArchitectureError as exc:
+            raise HTTPException(422, {"message": "invalid architecture", "errors": exc.errors}) from None
+        return app.state.jobs.submit({"services": body["services"]})
+
+    @app.get("/jobs/{job_id}")
+    def get_job(job_id: str = PathParam(pattern=r"^[0-9a-f]{32}$")) -> dict[str, Any]:
+        job = app.state.jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "unknown job (the API may have restarted; check the Certificates page)")
+        return job
 
     @app.post("/architectures/analyze")
     async def analyze_architecture_endpoint(request: Request, use_groq: bool = True) -> dict[str, Any]:

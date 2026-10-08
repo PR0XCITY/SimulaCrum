@@ -12,7 +12,7 @@ import type { ArchitectureServiceInfo, Certificate, CheckResult, ConfigChange, R
 
 export type Async<T> =
   | { status: "idle" }
-  | { status: "running"; startedAt: number; forKey: string }
+  | { status: "running"; startedAt: number; forKey: string; note?: string }
   | { status: "ready"; data: T; forKey: string }
   | { status: "error"; error: string; forKey: string };
 
@@ -233,7 +233,9 @@ export function ResultsPanel({
       </div>
       <p className="-mt-1 px-4 pb-3 text-[11px] leading-relaxed text-zinc-500">
         {full.status === "running" ? (
-          <>Running the full check on MiniStack… <Elapsed since={full.startedAt} /> (usually 40 to 150 s). It will appear on the Certificates page.</>
+          <>Running the full check on MiniStack… <Elapsed since={full.startedAt} /> (1 to 2 min, longer for big designs).
+          {full.note ? ` ${full.note}` : ""} It runs on the server: you can leave this page, and the result will appear on
+          the Certificates page.</>
         ) : (
           <>The verdict below is a quick preview. <span className="text-zinc-300">Certify</span> runs the full check (policy, a real
           MiniStack apply, cost), signs it and saves it to the Certificates page.</>

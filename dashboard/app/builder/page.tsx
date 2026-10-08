@@ -9,7 +9,7 @@ import { ResultsPanel, type Async } from "@/components/builder/ResultsPanel";
 import { SaveSlots } from "@/components/builder/SaveSlots";
 import { ServiceCard } from "@/components/builder/ServiceCard";
 import { EmptyState, ErrorState, SkeletonBlock } from "@/components/states";
-import { ApiError, api, isAbort } from "@/lib/api";
+import { ApiError, api, certify, isAbort } from "@/lib/api";
 import {
   applyChanges, canApply, EXAMPLES, loadExample, newService, ownerMap, stripIndex, toArchitecture, type BuilderService,
 } from "@/lib/builder";
@@ -91,12 +91,26 @@ export default function BuilderPage() {
     return () => clearTimeout(timer);
   }, [previewValid, key, architecture]);
 
+  // Certify runs as a background job on the API; poll it so no request has to stay open for minutes.
+  const unmounted = useRef(false);
+  useEffect(() => {
+    unmounted.current = false; // React dev mode mounts twice: reset on every mount
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
   const runFull = useCallback(() => {
     const forKey = key;
-    setFull({ status: "running", startedAt: Date.now(), forKey });
-    api.analyzeArchitecture(architecture).then(
-      (data) => setFull({ status: "ready", data, forKey }),
-      (err) => setFull({ status: "error", error: message(err), forKey }),
+    const startedAt = Date.now();
+    setFull({ status: "running", startedAt, forKey });
+    certify(architecture, (job) => {
+      const note = job.status === "queued" && job.queue_position
+        ? `Waiting for ${job.queue_position} other certification${job.queue_position === 1 ? "" : "s"} to finish first.`
+        : undefined;
+      if (!unmounted.current) setFull({ status: "running", startedAt, forKey, note });
+    }, () => unmounted.current).then(
+      (data) => !unmounted.current && setFull({ status: "ready", data, forKey }),
+      (err) => !unmounted.current && !isAbort(err) && setFull({ status: "error", error: message(err), forKey }),
     );
   }, [architecture, key]);
 

@@ -29,6 +29,43 @@ export class ApiError extends Error {
   }
 }
 
+export interface CertifyJob {
+  job_id: string;
+  status: "queued" | "running" | "done" | "error";
+  plan_id: string | null;
+  verdict: Certificate["verdict"] | null;
+  error: string | null;
+  queue_position: number | null; // jobs ahead of this one (shadow runs go one at a time)
+  elapsed_s: number;
+}
+
+const POLL_MS = 2000;
+const MAX_POLL_FAILURES = 5; // tolerate brief network blips while polling
+
+/** Start a Certify job and poll it until the certificate is stored. */
+export async function certify(arch: { services: ArchitectureService[] }, onProgress?: (job: CertifyJob) => void,
+                              isCancelled: () => boolean = () => false): Promise<Certificate> {
+  let job = await api.startCertify(arch);
+  let failures = 0;
+  onProgress?.(job);
+  while (job.status === "queued" || job.status === "running") {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    if (isCancelled()) throw new DOMException("cancelled", "AbortError");
+    try {
+      job = await api.job(job.job_id);
+      failures = 0;
+      onProgress?.(job);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        throw new ApiError("The API restarted while certifying. Check the Certificates page, or press Certify again.");
+      }
+      if (++failures >= MAX_POLL_FAILURES) throw err;
+    }
+  }
+  if (job.status === "error" || !job.plan_id) throw new ApiError(job.error ?? "Certify failed");
+  return api.getCertificate(job.plan_id);
+}
+
 export function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
@@ -114,6 +151,10 @@ export const api = {
   // 40-150 s: full pipeline incl. MiniStack apply; stores a signed certificate.
   analyzeArchitecture: (arch: { services: ArchitectureService[] }, signal?: AbortSignal) =>
     postJson<Certificate>("/architectures/analyze", arch, 600000, signal),
+  // Certify as a background job (a big design can take minutes; no request stays open that long).
+  startCertify: (arch: { services: ArchitectureService[] }) =>
+    postJson<CertifyJob>("/architectures/certify", arch, 30000),
+  job: (jobId: string) => request<CertifyJob>(`/jobs/${jobId}`, {}, 15000),
   // Compare slots, kept in SQLite. Saving runs the static check (~20-30 s).
   comparisons: () => request<Comparison>("/comparisons"),
   saveDesign: (slot: Slot, arch: { services: ArchitectureService[] }) =>

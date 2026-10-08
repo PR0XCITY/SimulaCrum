@@ -394,3 +394,73 @@ def test_summary_names_the_builder_design(tmp_path):
                                                                  {"name": "assets", "type": "s3"}]}
     assert summary["pillar_scores"] == {"security": 100, "reliability": 95, "cost": 100, "performance": 100}
     assert summary["blocking_count"] == 0
+
+
+# --- background Certify jobs --------------------------------------------------------------
+
+
+def _wait_for(client, job_id, timeout=10):
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            return job
+        time.sleep(0.05)
+    raise AssertionError(f"job {job_id} did not finish: {job}")
+
+
+def _fake_cert(plan_id="c" * 64, verdict="AUTO_APPROVED"):
+    return {"plan_id": plan_id, "timestamp": "2026-10-09T00:00:00Z", "verdict": verdict, "generated_by": "template",
+            "signature": "s" * 64, "resource_changes": [], "blast_radius": {"risk_flags": []},
+            "cost_delta": {"monthly_usd": 1.0}, "shadow_run": {"applied": True}, "architecture": None}
+
+
+def test_certify_runs_in_the_background_and_stores_the_certificate(tmp_path):
+    import threading
+
+    from app.store import Store
+
+    release = threading.Event()
+    calls = []
+
+    def slow_analyzer(body, use_groq=True):
+        calls.append(body)
+        release.wait(5)  # stands in for minutes of Terraform + MiniStack
+        return _fake_cert()
+
+    body = {"services": [{"type": "s3", "config": {"name": "logs"}}]}
+    with TestClient(create_app(store=Store(tmp_path / "db"), architecture_analyzer=slow_analyzer)) as client:
+        started = client.post("/architectures/certify", json=body)
+        assert started.status_code == 202  # returns at once, while the analysis is still running
+        job = started.json()
+        assert job["status"] in ("queued", "running") and len(job["job_id"]) == 32
+        # a double click / Retry for the same design gets the same job, not a second run
+        assert client.post("/architectures/certify", json=body).json()["job_id"] == job["job_id"]
+        release.set()
+        done = _wait_for(client, job["job_id"])
+        assert done["status"] == "done" and done["plan_id"] == "c" * 64 and done["verdict"] == "AUTO_APPROVED"
+        assert client.get(f"/certificates/{'c' * 64}").status_code == 200
+        assert len(calls) == 1
+        # once finished, certifying again starts a new job
+        assert client.post("/architectures/certify", json=body).json()["job_id"] != job["job_id"]
+
+
+def test_certify_job_reports_errors_and_validates_first(tmp_path):
+    from app.shadow import ShadowError
+    from app.store import Store
+
+    def failing(body, use_groq=True):
+        raise ShadowError("terraform plan failed: boom")
+
+    with TestClient(create_app(store=Store(tmp_path / "db"), architecture_analyzer=failing)) as client:
+        job = client.post("/architectures/certify", json={"services": [{"type": "s3", "config": {}}]}).json()
+        failed = _wait_for(client, job["job_id"])
+        assert failed["status"] == "error"
+        assert failed["error"] == "could not plan the generated Terraform: terraform plan failed: boom"
+        assert client.get("/certificates").json() == []
+        bad = client.post("/architectures/certify", json={"services": [{"type": "ec2", "config": {"count": 0}}]})
+        assert bad.status_code == 422
+        assert client.get("/jobs/" + "f" * 32).status_code == 404
+        assert client.get("/jobs/not-a-job").status_code == 422
