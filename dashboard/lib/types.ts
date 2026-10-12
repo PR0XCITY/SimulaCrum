@@ -118,8 +118,12 @@ export interface Certificate {
   generated_terraform?: string | null;
   architecture?: { services: (ArchitectureServiceInfo & { analysis: "shadow_and_static" | "static_only" })[] } | null;
   pillars?: Pillars; // added later; absent on older certificates
+  signature_alg?: SignatureAlg; // absent on older certificates, which are HMAC-SHA256
   signature: string;
 }
+
+// ed25519: anyone can verify with GET /public-key; hmac-sha256: only holders of the secret.
+export type SignatureAlg = "ed25519" | "hmac-sha256";
 
 // --- service catalog & architecture builder ------------------------------------------------
 
@@ -228,6 +232,7 @@ export interface VerifyResult {
   verdict: Verdict;
   timestamp: string;
   signature: string;
+  signature_alg: SignatureAlg;
 }
 
 export const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];

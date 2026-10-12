@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "boto3>=1.40",
     "networkx>=3.3",
+    "cryptography>=43",
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "python-multipart>=0.0.9",

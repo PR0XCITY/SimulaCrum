@@ -4,7 +4,8 @@ Field names are a contract with the dashboard (dashboard/lib/types.ts mirrors th
   plan_id, timestamp, resource_changes[{resource, action, before, after}],
   blast_radius{newly_public, iam_widened, risk_flags[{rule, severity, resource,
   message}], graph{nodes, edges}}, shadow_run{applied, resources_created, error},
-  cost_delta{monthly_usd, note}, verdict, risk_explanation, generated_by, signature
+  cost_delta{monthly_usd, note}, verdict, risk_explanation, generated_by, signature_alg,
+  signature
 
 plan_id     sha256 of the canonical plan JSON (sorted keys, no whitespace), so
             the same plan always gets the same id however it was formatted.
@@ -28,9 +29,14 @@ explanation Groq gets only sanitized structure (rule ids/titles, resource types,
             severities, verdict, whether the shadow apply worked) - never addresses,
             values, ARNs or account ids. Any Groq failure -> template, generated_by
             "template".
-signature   HMAC-SHA256 (hex) with GHOSTOPS_HMAC_SECRET over
-            plan_id + "\\n" + canonical JSON of every field except signature.
-            verify() recomputes it; editing any field breaks it.
+signature_alg  "ed25519" when GHOSTOPS_SIGNING_KEY is set (preferred), else "hmac-sha256".
+            It is part of the signed body, so it cannot be swapped. Certificates from
+            before this field existed have none and are HMAC-SHA256.
+signature   hex over plan_id + "\\n" + canonical JSON of every field except signature:
+            Ed25519 with GHOSTOPS_SIGNING_KEY (anyone can verify with the public key
+            from GET /public-key, e.g. scripts/verify_certificate.py), or HMAC-SHA256
+            with GHOSTOPS_HMAC_SECRET (only secret holders can verify). verify()
+            accepts both; editing any field breaks it.
 before/after values Terraform marks sensitive are replaced with "(sensitive)".
 
 CLI: python -m app.certificate --plan plan.json [--tf DIR] [--no-groq]
@@ -50,8 +56,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
 from app.blast_radius import analyze as analyze_blast_radius
 from app.config import hosted, setting
+from app.keys import SigningKeyError, load_private_key, load_public_key
 from app.cost import CostError, InfracostAuthError, plan_cost
 from app.plan_parser import PlanParseError, ResourceChange, parse_plan
 from app.policy_engine import PolicyEngineError, evaluate
@@ -99,6 +109,10 @@ class CertificateError(RuntimeError):
     """A certificate cannot be produced (e.g. no signing secret)."""
 
 
+ED25519 = "ed25519"
+HMAC_SHA256 = "hmac-sha256"
+
+
 # --- canonical form & signature ------------------------------------------------------
 
 
@@ -122,22 +136,76 @@ def _signing_input(cert: dict[str, Any]) -> bytes:
     return str(cert.get("plan_id", "")).encode("utf-8") + b"\n" + canonical(body)
 
 
-def sign(cert: dict[str, Any], *, secret: str | None = None) -> str:
-    return hmac.new(_secret(secret), _signing_input(cert), hashlib.sha256).hexdigest()
+def _private_key(signing_key: str | Ed25519PrivateKey | None) -> Ed25519PrivateKey:
+    if isinstance(signing_key, Ed25519PrivateKey):
+        return signing_key
+    try:
+        key = load_private_key(signing_key)
+    except SigningKeyError as exc:
+        raise CertificateError(str(exc)) from None
+    if key is None:
+        raise CertificateError("GHOSTOPS_SIGNING_KEY is not set (python -m app.keys generate)")
+    return key
 
 
-def verify(cert: dict[str, Any], *, secret: str | None = None, plan: dict[str, Any] | None = None) -> bool:
-    """True only if the signature matches the body (and, if given, the plan)."""
+def _public_key(public_key: str | Ed25519PublicKey | None) -> Ed25519PublicKey | None:
+    if isinstance(public_key, Ed25519PublicKey):
+        return public_key
+    if public_key is not None:
+        return load_public_key(public_key)
+    key = load_private_key()
+    return key.public_key() if key else None
+
+
+def signature_alg(cert: dict[str, Any]) -> str:
+    """Certificates signed before signature_alg existed are HMAC-SHA256."""
+    return cert.get("signature_alg", HMAC_SHA256)
+
+
+def sign(cert: dict[str, Any], *, secret: str | None = None,
+         signing_key: str | Ed25519PrivateKey | None = None) -> str:
+    """Sign with the algorithm the certificate names in signature_alg."""
+    alg = signature_alg(cert)
+    if alg == ED25519:
+        return _private_key(signing_key).sign(_signing_input(cert)).hex()
+    if alg == HMAC_SHA256:
+        return hmac.new(_secret(secret), _signing_input(cert), hashlib.sha256).hexdigest()
+    raise CertificateError(f"unknown signature_alg {alg!r}")
+
+
+def verify(cert: dict[str, Any], *, secret: str | None = None, plan: dict[str, Any] | None = None,
+           public_key: str | Ed25519PublicKey | None = None) -> bool:
+    """True only if the signature matches the body (and, if given, the plan).
+
+    Ed25519 certificates are checked with public_key (default: derived from
+    GHOSTOPS_SIGNING_KEY); HMAC-SHA256 ones, including old ones without signature_alg,
+    with secret (default: GHOSTOPS_HMAC_SECRET)."""
     signature = cert.get("signature")
     if not isinstance(signature, str):
         return False
     if plan is not None and cert.get("plan_id") != compute_plan_id(plan):
         return False
+    alg = signature_alg(cert)
     try:
-        expected = sign(cert, secret=secret)
-    except (TypeError, ValueError):
+        if alg == ED25519:
+            key = _public_key(public_key)
+            if key is None:
+                return False
+            key.verify(bytes.fromhex(signature), _signing_input(cert))
+            return True
+        if alg == HMAC_SHA256:
+            return hmac.compare_digest(sign(cert, secret=secret), signature)
+    except (InvalidSignature, CertificateError, TypeError, ValueError):
         return False
-    return hmac.compare_digest(expected, signature)
+    return False
+
+
+def _signer(secret: str | None, signing_key: str | Ed25519PrivateKey | None) -> tuple[str, Any]:
+    """(alg, key) to sign with: an explicit argument wins, then GHOSTOPS_SIGNING_KEY, then
+    GHOSTOPS_HMAC_SECRET. Raises CertificateError if there is nothing usable."""
+    if signing_key is not None or (secret is None and setting("GHOSTOPS_SIGNING_KEY")):
+        return ED25519, _private_key(signing_key)
+    return HMAC_SHA256, _secret(secret).decode("utf-8")
 
 
 # --- sections -------------------------------------------------------------------------
@@ -432,6 +500,7 @@ def build_certificate(
     cost_result: dict[str, Any] | None = None,
     use_groq: bool = True,
     secret: str | None = None,
+    signing_key: str | Ed25519PrivateKey | None = None,
     now: datetime | None = None,
     generated=None,
 ) -> dict[str, Any]:
@@ -440,7 +509,7 @@ def build_certificate(
     from app.remediation import remediate
 
     changes = parse_plan(plan)  # PlanParseError for anything malformed
-    secret_bytes = _secret(secret)  # fail before doing slow work if we cannot sign
+    alg, key = _signer(secret, signing_key)  # fail before doing slow work if we cannot sign
     blast = analyze_blast_radius(plan)
     shadow, shadow_flags = shadow_section(tf_dir, shadow_result)
     cost, cost_breakdown = cost_section(plan, cost_result, generated=generated)
@@ -474,8 +543,9 @@ def build_certificate(
         "generated_terraform": generated.main_tf if generated is not None else None,
         "architecture": architecture_section(generated),
         "pillars": pillars_section(flags),
+        "signature_alg": alg,
     }
-    cert["signature"] = sign(cert, secret=secret_bytes.decode("utf-8"))
+    cert["signature"] = sign(cert, **({"signing_key": key} if alg == ED25519 else {"secret": key}))
     return cert
 
 

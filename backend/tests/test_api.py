@@ -24,6 +24,7 @@ GROQ_KEY = "gsk_TESTKEYshouldNEVERappearINlogs123456"
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
     monkeypatch.setenv("GHOSTOPS_HMAC_SECRET", SECRET)
+    monkeypatch.setenv("GHOSTOPS_SIGNING_KEY", "")  # HMAC here; Ed25519 API tests are in test_signing.py
     monkeypatch.setenv("GROQ_API_KEY", GROQ_KEY)
     monkeypatch.setenv("GHOSTOPS_HOSTED", "0")  # explicit, so a local .env cannot switch it on
 
@@ -281,7 +282,8 @@ def test_verify_detects_tampering_in_the_database(client, store):
     cert = analyze(client, "bad_plan.json", "demo/bad").json()
     ok = client.get(f"/verify/{cert['plan_id']}").json()
     assert ok == {"plan_id": cert["plan_id"], "valid": True, "verdict": "BLOCKED_PENDING_REVIEW",
-                  "timestamp": cert["timestamp"], "signature": cert["signature"]}
+                  "timestamp": cert["timestamp"], "signature": cert["signature"],
+                  "signature_alg": "hmac-sha256"}
     tamper(store, cert["plan_id"])
     assert client.get(f"/verify/{cert['plan_id']}").json()["valid"] is False
     r = client.post(f"/certificates/{cert['plan_id']}/decision", json={"decision": "approve", "reviewer": "ana"})
@@ -312,7 +314,7 @@ def test_refuses_to_start_without_a_valid_secret(monkeypatch, tmp_path, value):
 
 
 def test_server_exits_with_clear_message_when_secret_missing():
-    env = {**__import__("os").environ, "GHOSTOPS_HMAC_SECRET": ""}
+    env = {**__import__("os").environ, "GHOSTOPS_HMAC_SECRET": "", "GHOSTOPS_SIGNING_KEY": ""}
     proc = subprocess.run([sys.executable, "-m", "app.server", "--port", "8999"], cwd=BACKEND, env=env,
                           capture_output=True, text=True, timeout=60)
     assert proc.returncode == 2

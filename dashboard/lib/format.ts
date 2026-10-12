@@ -1,4 +1,4 @@
-import type { Severity } from "./types";
+import type { Severity, SignatureAlg } from "./types";
 import { SEVERITIES } from "./types";
 
 const usd = new Intl.NumberFormat(undefined, {
@@ -17,6 +17,10 @@ export function formatUsd(value: number | null): string {
 export function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : dateTime.format(date);
+}
+
+export function signatureAlgLabel(alg: SignatureAlg | undefined): string {
+  return alg === "ed25519" ? "Ed25519" : "HMAC-SHA256"; // no field: signed before Ed25519 existed
 }
 
 export function shortHash(hash: string, length = 12): string {

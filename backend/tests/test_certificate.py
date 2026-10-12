@@ -20,7 +20,7 @@ SECRET = "0123456789abcdef" * 4
 NOW = datetime(2026, 10, 6, 12, 0, 0, tzinfo=timezone.utc)
 TOP_LEVEL = ["plan_id", "timestamp", "resource_changes", "blast_radius", "shadow_run", "cost_delta",
              "verdict", "risk_explanation", "generated_by", "cost_breakdown", "generated_terraform",
-             "architecture", "pillars", "signature"]
+             "architecture", "pillars", "signature_alg", "signature"]
 
 
 def load(name):
@@ -62,6 +62,7 @@ def test_exact_dashboard_schema():
     assert isinstance(cert["cost_breakdown"], list)
     assert cert["timestamp"] == "2026-10-06T12:00:00Z"
     assert cert["generated_by"] == "template"
+    assert cert["signature_alg"] == "hmac-sha256"  # secret= given; Ed25519 is in test_signing.py
     assert len(cert["signature"]) == 64 and int(cert["signature"], 16) >= 0
 
 
@@ -229,7 +230,8 @@ def test_real_secret_from_env_signs_and_verifies():
     cert = build_certificate(load("good_plan.json"), shadow_result=shadow_ok(2), cost_result=cost_result(0.1),
                              use_groq=False)
     assert verify(cert)
-    assert not verify(cert, secret=SECRET)
+    if cert["signature_alg"] == "hmac-sha256":  # .env has no GHOSTOPS_SIGNING_KEY
+        assert not verify(cert, secret=SECRET)
 
 
 # --- sensitive values -------------------------------------------------------------------------

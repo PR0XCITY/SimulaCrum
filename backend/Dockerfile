@@ -1,6 +1,6 @@
 # GhostOps API image (Render, or any Docker host). Build from the repo root:
 #   docker build -f backend/Dockerfile -t ghostops-api .
-# Runs in hosted mode: GHOSTOPS_HOSTED=1 needs GHOSTOPS_API_KEY and GHOSTOPS_HMAC_SECRET
+# Runs in hosted mode: GHOSTOPS_HOSTED=1 needs GHOSTOPS_API_KEY and GHOSTOPS_SIGNING_KEY (or GHOSTOPS_HMAC_SECRET)
 # at run time (never baked in). Shadow runs go to MiniStack only (MINISTACK_ENDPOINT_URL).
 # Infracost is deliberately not installed: it has no API key, only an interactive OAuth
 # login, so certificates report cost as null with a note instead of opening a login.

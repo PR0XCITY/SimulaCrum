@@ -8,7 +8,7 @@ import { ResourceGraph } from "@/components/ResourceGraph";
 import { SEVERITY_STYLE, SignatureBadge, VerdictBadge } from "@/components/badges";
 import { ErrorState, SkeletonBlock } from "@/components/states";
 import { api } from "@/lib/api";
-import { formatTimestamp, formatUsd } from "@/lib/format";
+import { formatTimestamp, formatUsd, signatureAlgLabel } from "@/lib/format";
 import { useCertificate, type CertificateDetail } from "@/lib/useCertificates";
 import type { Certificate, Decision } from "@/lib/types";
 import { SEVERITIES } from "@/lib/types";
@@ -439,7 +439,12 @@ export default function CertificatePage() {
           <Panel title="Signature">
             <div className="flex flex-col gap-2 px-4 py-3">
               <SignatureBadge state={signature} />
-              <p className="break-all font-mono text-[11px] text-zinc-500" translate="no">HMAC-SHA256 {cert.signature}</p>
+              <p className="break-all font-mono text-[11px] text-zinc-500" translate="no">{signatureAlgLabel(cert.signature_alg)} {cert.signature}</p>
+              <p className="text-[11px] text-zinc-500">
+                {cert.signature_alg === "ed25519"
+                  ? "Public-key signature: anyone can check it offline with GET /public-key and scripts/verify_certificate.py."
+                  : "Shared-secret signature: only the GhostOps server can check it."}
+              </p>
             </div>
           </Panel>
         </div>

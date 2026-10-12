@@ -57,7 +57,8 @@ def render(cert: dict[str, Any], valid: bool) -> str:
         if cost["note"]:
             lines.append(wrap(cost["note"], "  "))
     lines += ["", f"Explanation ({cert['generated_by']}):", wrap(cert["risk_explanation"], "  ", ""), "",
-              f"Signature: {cert['signature']} ({'verified' if valid else 'INVALID'})"]
+              f"Signature ({cert.get('signature_alg', 'hmac-sha256')}): {cert['signature']} "
+              f"({'verified' if valid else 'INVALID'})"]
     return "\n".join(lines)
 
 

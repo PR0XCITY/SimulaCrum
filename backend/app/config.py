@@ -33,7 +33,8 @@ def setting(name: str, default: str | None = None) -> str | None:
 
 
 REPO_ROOT = ENV_FILE.parent
-SECRET_SETTINGS = ("GHOSTOPS_HMAC_SECRET", "GROQ_API_KEY", "GHOSTOPS_API_KEY", "GHOSTOPS_DATABASE_URL")
+SECRET_SETTINGS = ("GHOSTOPS_HMAC_SECRET", "GHOSTOPS_SIGNING_KEY", "GROQ_API_KEY", "GHOSTOPS_API_KEY",
+                   "GHOSTOPS_DATABASE_URL")
 LOCAL_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
 
 
@@ -44,10 +45,19 @@ class ConfigError(RuntimeError):
 def check_required() -> None:
     """Refuse to start without what the backend cannot work without."""
     problems = []
+    signing_key = setting("GHOSTOPS_SIGNING_KEY")
+    if signing_key:
+        from app.keys import SigningKeyError, load_private_key
+        try:
+            load_private_key(signing_key)
+        except SigningKeyError as exc:
+            problems.append(f"{exc} (generate one: python -m app.keys generate)")
     secret = setting("GHOSTOPS_HMAC_SECRET")
-    if not secret:
-        problems.append("GHOSTOPS_HMAC_SECRET is not set (it signs every Risk Certificate).")
-    elif len(secret) < 32:
+    if not secret and not signing_key:
+        problems.append("GHOSTOPS_HMAC_SECRET is not set and neither is GHOSTOPS_SIGNING_KEY "
+                        "(one of them signs every Risk Certificate; Ed25519 via python -m app.keys generate "
+                        "is preferred).")
+    elif secret and len(secret) < 32:
         problems.append("GHOSTOPS_HMAC_SECRET is shorter than 32 characters.")
     if hosted():
         key = setting("GHOSTOPS_API_KEY")
@@ -62,7 +72,8 @@ def check_required() -> None:
         raise ConfigError(
             "GhostOps cannot start:\n  - " + "\n  - ".join(problems) + "\n"
             f"Add it to {ENV_FILE} (template: .env.example). Generate one with:\n"
-            '  python -c "import secrets; print(secrets.token_hex(32))"'
+            "  python -m app.keys generate   (GHOSTOPS_SIGNING_KEY, Ed25519)\n"
+            '  python -c "import secrets; print(secrets.token_hex(32))"   (GHOSTOPS_HMAC_SECRET)'
         )
 
 

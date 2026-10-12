@@ -19,7 +19,9 @@ services:
     envVars:
       - key: GHOSTOPS_HOSTED            # API key on POST/PUT/DELETE, no plan_path/tf_dir
         value: "1"
-      - key: GHOSTOPS_HMAC_SECRET       # >= 32 chars; python -c "import secrets; print(secrets.token_hex(32))"
+      - key: GHOSTOPS_SIGNING_KEY       # Ed25519; python -m app.keys generate (paste only the value)
+        sync: false
+      - key: GHOSTOPS_HMAC_SECRET       # optional legacy HMAC; >= 32 chars; python -c "import secrets; print(secrets.token_hex(32))"
         sync: false
       - key: GHOSTOPS_API_KEY           # >= 24 chars; the same value goes in Vercel's NEXT_PUBLIC_GHOSTOPS_API_KEY
         sync: false

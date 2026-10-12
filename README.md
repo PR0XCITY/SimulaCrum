@@ -44,7 +44,7 @@ flowchart LR
     parser --> shadow
     parser --> cost
 
-    opa --> cert["Risk Certificate<br/>verdict + HMAC-SHA256 signature"]
+    opa --> cert["Risk Certificate<br/>verdict + Ed25519 signature"]
     blast --> cert
     shadow --> cert
     cost --> cert
@@ -63,7 +63,7 @@ flowchart LR
 | Blast radius (`app/blast_radius.py`) | Builds before/after resource graphs (references + matching ids/ARNs) and reports what becomes reachable from `0.0.0.0/0` and which IAM permissions widen. |
 | Shadow run (`app/shadow.py`) | Copies the Terraform directory, forces the AWS provider onto MiniStack with fake keys (override file + scrubbed environment), applies on a freshly reset MiniStack, records the resulting resources, resets again. |
 | Cost delta (`app/cost.py`) | Prices the before and after states with Infracost and reports the monthly change per resource. Anything it cannot price is `null` with a reason, never a guess. |
-| Certificate (`app/certificate.py`) | Combines everything, decides the verdict, gets an explanation from Groq (sanitized input, template fallback) and signs it with HMAC-SHA256. |
+| Certificate (`app/certificate.py`) | Combines everything, decides the verdict, gets an explanation from Groq (sanitized input, template fallback) and signs it with Ed25519 (`GHOSTOPS_SIGNING_KEY`; HMAC-SHA256 if only `GHOSTOPS_HMAC_SECRET` is set). |
 | Remediation (`app/remediation.py`) | Every flag gets a fix. The config change is chosen by deterministic rules, never by the LLM; Groq only words the sentence, from sanitized input, with a template fallback. |
 | Catalog + generator (`app/catalog.py`, `app/generator.py`) | Nine AWS services (EC2, S3, RDS, VPC, IAM, Lambda, DynamoDB, CloudWatch alarm, ALB) with typed, validated options and optional usage inputs, turned into Terraform that targets MiniStack. |
 | Architectures (`app/architecture.py`) | Runs the generated Terraform through the same pipeline: `terraform plan` locally, then the checks above. |
@@ -150,8 +150,10 @@ Other principles that follow from it:
   files at empty files and forces all endpoints to `localhost:4566`.
 - **Nothing sensitive leaves the machine for the LLM.** Groq receives only rule ids, rule
   titles, resource types, severities and the verdict, never names, values, ARNs or costs.
-- **Tamper-evident.** The certificate is signed over every field; editing any value breaks
-  `GET /verify/{plan_id}`. Reviewer decisions go to an append-only audit log and are never
+- **Tamper-evident, publicly verifiable.** The certificate is signed with Ed25519 over every
+  field; editing any value breaks `GET /verify/{plan_id}`. Anyone can check it offline with the
+  public key from `GET /public-key`, while only GhostOps holds the private key (see
+  [Verifying a certificate](#verifying-a-certificate-without-any-secret)). Reviewer decisions go to an append-only audit log and are never
   applied to any system.
 
 ## How it is used
@@ -280,7 +282,9 @@ python -m venv .venv
 npm --prefix dashboard install
 
 copy .env.example .env
-# put a signing secret in .env:
+# create a signing key and paste the GHOSTOPS_SIGNING_KEY=... line it prints into .env yourself:
+.venv\Scripts\python.exe -m app.keys generate
+# optional, only to keep verifying certificates signed before Ed25519 (HMAC-SHA256):
 python -c "import secrets; print('GHOSTOPS_HMAC_SECRET=' + secrets.token_hex(32))"
 # optional: add GROQ_API_KEY to .env, then log in to Infracost:
 infracost auth login
@@ -288,6 +292,27 @@ infracost auth login
 
 Infracost v2 uses a browser login, not an API key. Without it, `cost_delta` is `null` with a
 note. Without a Groq key, the explanation uses a template.
+
+### Verifying a certificate without any secret
+
+New certificates carry `"signature_alg": "ed25519"` and a hex Ed25519 signature over
+`plan_id + "\n" + canonical JSON` (sorted keys, no whitespace) of every other field,
+`signature_alg` included, so the algorithm cannot be swapped. Only the holder of
+`GHOSTOPS_SIGNING_KEY` can sign; anyone with the public key can verify:
+
+```powershell
+curl.exe -s http://127.0.0.1:8000/public-key -o ghostops-pub.json
+curl.exe -s http://127.0.0.1:8000/certificates/<plan_id> -o cert.json
+.venv\Scripts\python.exe scripts\verify_certificate.py cert.json ghostops-pub.json --plan plan.json
+```
+
+The script needs only the `cryptography` package and exits 0 (valid), 1 (invalid: tampered,
+wrong key, other plan, or HMAC-signed) or 2 (unreadable input). `python -m app.keys public`
+prints the public key of the configured key. Certificates from before Ed25519 have no
+`signature_alg` and are HMAC-SHA256: `GET /verify/{plan_id}` still accepts them as long as
+`GHOSTOPS_HMAC_SECRET` is set, but only the server can check those. Without
+`GHOSTOPS_SIGNING_KEY`, GhostOps falls back to signing with HMAC-SHA256 and `/public-key`
+returns 404.
 
 ### Run the demo (one command)
 
@@ -339,7 +364,8 @@ Exit code 0 = auto-approved, 1 = blocked, 2 = error. The same works through the 
 | `GET /demos`, `POST /analyze/demo/{name}` | Run the bundled demos |
 | `GET /certificates`, `GET /certificates/{id}` | List or fetch certificates |
 | `GET /certificates/{id}/decisions`, `POST /certificates/{id}/decision` | Audit log; approve or deny a blocked certificate |
-| `GET /verify/{id}` | Recompute and check the HMAC signature |
+| `GET /verify/{id}` | Check the signature (Ed25519, or HMAC-SHA256 for older certificates) |
+| `GET /public-key` | The Ed25519 public key that verifies certificates (404 if signing with HMAC only) |
 | `PUT /comparisons/{A\|B}` | Save a design in a compare slot (runs the static check, stores architecture + result) |
 | `GET /comparisons`, `DELETE /comparisons/{A\|B}` | Both slots with diff and highlights; empty a slot |
 
@@ -401,7 +427,10 @@ CORS always allows `http://localhost:3000`. Add your Vercel URL with `GHOSTOPS_C
      It is reachable only from the API, and `MINISTACK_ENDPOINT_URL` is wired to it.
 2. Render asks for the values marked `sync: false`. Enter them in Render's dashboard and never
    commit them:
-   - `GHOSTOPS_HMAC_SECRET`: `python -c "import secrets; print(secrets.token_hex(32))"`
+   - `GHOSTOPS_SIGNING_KEY`: run `python -m app.keys generate` locally and paste only the
+     value after `GHOSTOPS_SIGNING_KEY=`
+   - `GHOSTOPS_HMAC_SECRET`: optional, only to verify older HMAC certificates;
+     `python -c "import secrets; print(secrets.token_hex(32))"`
    - `GHOSTOPS_API_KEY`: generate one the same way
    - `GROQ_API_KEY`: optional; without it the explanations use the built-in template
    - `GHOSTOPS_CORS_ORIGINS`: your Vercel URL, for example `https://ghostops.vercel.app`
@@ -523,7 +552,10 @@ deployment protection and keep the key private, or add proper user login. Rotate
   `.json` path it is given; only one shadow run uses MiniStack at a time. Hosted mode (see
   [Deploying](#deploying-vercel--render)) adds a shared API key and turns off server paths,
   but it has no user accounts and anyone can read the certificates.
-- **HMAC is symmetric.** Anyone holding `GHOSTOPS_HMAC_SECRET` can create valid certificates.
+- **One signing key, no rotation story.** Certificates do not name the key that signed them;
+  after changing `GHOSTOPS_SIGNING_KEY`, older Ed25519 certificates verify only against the old
+  public key (keep it to check them with the script). Older HMAC certificates still rely on a
+  shared secret: anyone holding `GHOSTOPS_HMAC_SECRET` could forge one of those.
 
 ## Future work
 
@@ -531,7 +563,8 @@ deployment protection and keep the key private, or add proper user login. Rotate
   call the decision endpoint, so reviewers do not need the dashboard.
 - **Automated rollback:** after an approved change is applied for real, watch for drift or
   alarms and generate the inverse plan (with its own certificate) to roll back.
-- Asymmetric signatures (Ed25519) so certificates can be verified without the signing secret.
+- Key ids and a published key history, so Ed25519 keys can be rotated without losing the
+  ability to verify older certificates.
 - More rules (IAM trust policies, KMS, public snapshots, Lambda function URLs) and per-team
   policy packs.
 - A CI integration that fails a pull request when its plan would be blocked.

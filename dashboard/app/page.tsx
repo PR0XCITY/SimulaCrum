@@ -40,7 +40,7 @@ function HowItWorks() {
       <Step n={1} icon={Blueprint} title="Design in the Builder"
             body="Pick services and settings. A quick check runs as you edit; it is a preview and is not saved." />
       <Step n={2} icon={SealCheck} title="Certify it"
-            body="Runs the full check: policy rules, a real apply on MiniStack, cost and an HMAC signature. The result lands here." />
+            body="Runs the full check: policy rules, a real apply on MiniStack, cost and a signature. The result lands here." />
       <Step n={3} icon={UserCheck} title="Review if blocked"
             body="Security risks or an over-budget cost block the change until a reviewer approves or denies it." />
     </ol>

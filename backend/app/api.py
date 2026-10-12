@@ -10,7 +10,8 @@ GET  /certificates/{plan_id}          the certificate exactly as signed
 GET  /certificates/{plan_id}/decisions   the audit log for that plan
 POST /certificates/{plan_id}/decision {"decision": "approve"|"deny", "reviewer": "...", "comment": "..."}
      recorded in the append-only audit log; NEVER applied to any real system
-GET  /verify/{plan_id}                re-check the stored certificate's signature
+GET  /verify/{plan_id}                re-check the stored certificate's signature (Ed25519 or HMAC)
+GET  /public-key                      the Ed25519 public key that verifies certificates (404 if HMAC only)
 GET  /demos, POST /analyze/demo/{bad|good}   run a bundled demo (no paths from the browser)
 GET  /catalog                         services the Terraform generator supports, with form fields
 POST /architectures/preview           {"services": [{"type", "config"}]} -> generated Terraform only
@@ -55,7 +56,8 @@ from app.catalog import catalog
 from app.compare import comparison, snapshot
 from app.jobs import JobManager
 from app.shadow import ShadowError
-from app.certificate import CertificateError, build_certificate, verify
+from app.certificate import CertificateError, build_certificate, signature_alg, verify
+from app.keys import configured_public_key, key_id, public_key_b64, public_key_pem
 from app.generator import ArchitectureError, generate
 from app.config import check_required, cors_origins, hosted, install_secret_filter, setting
 from app.plan_parser import PlanParseError
@@ -366,6 +368,16 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
     def verify_certificate(plan_id: str = PLAN_ID) -> dict[str, Any]:
         cert = get_cert(plan_id)
         return {"plan_id": plan_id, "valid": verify(cert), "verdict": cert["verdict"],
-                "timestamp": cert["timestamp"], "signature": cert["signature"]}
+                "timestamp": cert["timestamp"], "signature": cert["signature"],
+                "signature_alg": signature_alg(cert)}
+
+    @app.get("/public-key")
+    def public_key() -> dict[str, str]:
+        """Anyone can verify an Ed25519 certificate with this; only GhostOps can sign."""
+        key = configured_public_key()
+        if key is None:
+            raise HTTPException(404, "this server signs with HMAC-SHA256 only (GHOSTOPS_SIGNING_KEY is not set)")
+        return {"alg": "ed25519", "public_key": public_key_b64(key), "public_key_pem": public_key_pem(key),
+                "key_id": key_id(key)}
 
     return app
