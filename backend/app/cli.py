@@ -16,7 +16,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-from app.config import ConfigError, check_required, db_path
+from app.config import ConfigError, check_required
 
 EXIT_APPROVED, EXIT_BLOCKED, EXIT_ERROR = 0, 1, 2
 
@@ -83,8 +83,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     if not args.no_store:
-        from app.store import Store
-        Store(db_path()).save_certificate(cert)
+        from app.store import open_store
+        try:
+            open_store().save_certificate(cert)
+        except ConfigError as exc:  # e.g. GHOSTOPS_DATABASE_URL unreachable; never prints the URL
+            print(exc, file=sys.stderr)
+            return EXIT_ERROR
     print(json.dumps(cert, indent=2) if args.json else render(cert, verify(cert)))
     return EXIT_APPROVED if cert["verdict"] == "AUTO_APPROVED" else EXIT_BLOCKED
 

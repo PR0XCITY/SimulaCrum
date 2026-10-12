@@ -57,9 +57,9 @@ from app.jobs import JobManager
 from app.shadow import ShadowError
 from app.certificate import CertificateError, build_certificate, verify
 from app.generator import ArchitectureError, generate
-from app.config import check_required, cors_origins, db_path, hosted, install_secret_filter, setting
+from app.config import check_required, cors_origins, hosted, install_secret_filter, setting
 from app.plan_parser import PlanParseError
-from app.store import Store
+from app.store import Store, open_store
 
 log = logging.getLogger("ghostops.api")
 API_KEY_HEADER = "X-GhostOps-Key"
@@ -151,7 +151,7 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
     # Added after the key check so CORS wraps it: a 401 still carries CORS headers.
     app.add_middleware(CORSMiddleware, allow_origins=cors_origins(), allow_methods=["GET", "POST", "PUT", "DELETE"],
                        allow_headers=["Content-Type", API_KEY_HEADER])
-    app.state.store = store or Store(db_path())
+    app.state.store = store or open_store()
 
     def get_cert(plan_id: str) -> dict[str, Any]:
         cert = app.state.store.get_certificate(plan_id)

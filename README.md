@@ -405,6 +405,9 @@ CORS always allows `http://localhost:3000`. Add your Vercel URL with `GHOSTOPS_C
    - `GHOSTOPS_API_KEY`: generate one the same way
    - `GROQ_API_KEY`: optional; without it the explanations use the built-in template
    - `GHOSTOPS_CORS_ORIGINS`: your Vercel URL, for example `https://ghostops.vercel.app`
+   - `GHOSTOPS_DATABASE_URL`: a free Postgres URL, so certificates survive restarts (see
+     [Keeping certificates](#keeping-certificates-free-postgres-on-neon) below). Leave it
+     empty to use SQLite, which the free plan wipes on every restart.
 3. When the deploy is live, `https://<your-service>.onrender.com/health` returns
    `{"status":"ok"}`.
 
@@ -414,6 +417,41 @@ To try the image locally first (Docker Desktop):
 docker build -f backend/Dockerfile -t ghostops-api .
 $env:GHOSTOPS_API_KEY = python -c "import secrets; print(secrets.token_hex(32))"
 docker run --rm -p 127.0.0.1:8000:8000 --env-file .env -e GHOSTOPS_API_KEY -e MINISTACK_ENDPOINT_URL=http://host.docker.internal:4566 ghostops-api
+```
+
+### Keeping certificates (free Postgres on Neon)
+
+On Render's free plan the container's disk is temporary, so the SQLite file (certificates,
+audit log, compare slots) is erased on every deploy, restart and spin-down. Set
+`GHOSTOPS_DATABASE_URL` and GhostOps stores everything in Postgres instead. Neon's free tier
+is enough and needs no card:
+
+1. Sign up at [neon.tech](https://neon.tech) and create a project (pick a region near
+   Render's, e.g. AWS US West (Oregon) for `region: oregon`). The default database
+   `neondb` is fine.
+2. On the project dashboard click **Connect** and copy the connection string. It looks like
+   `postgresql://USER:PASSWORD@ep-...neon.tech/neondb?sslmode=require`. Keep `sslmode=require`.
+   Either the direct or the pooled (`-pooler`) host works.
+3. In Render, open `ghostops-api` > **Environment**, set `GHOSTOPS_DATABASE_URL` to that
+   string and save (Render redeploys). It is a secret: it contains the database password, so
+   never commit it or paste it anywhere public. `render.yaml` lists it with `sync: false`.
+4. The deploy log shows `GhostOps storage: postgres`. The tables, and the triggers that keep
+   the audit log append-only (`UPDATE`, `DELETE` and `TRUNCATE` are rejected), are created on
+   startup. Certify something, restart the service (**Manual Deploy > Restart service**) and
+   the certificate is still listed.
+
+The URL never appears in logs or error messages. If the database cannot be reached, the API
+exits at startup with `cannot use the database in GHOSTOPS_DATABASE_URL` and the reason.
+A free Neon database also sleeps when idle; the first request after a pause takes a second or
+two longer. Locally, leave `GHOSTOPS_DATABASE_URL` empty to keep using `data/ghostops.db`.
+
+To run the store and API tests against Postgres as well, point `TEST_DATABASE_URL` at a
+throwaway database (each test uses its own schema and drops it). Without it those cases are
+skipped:
+
+```powershell
+$env:TEST_DATABASE_URL = "<a throwaway Postgres URL>"
+.venv\Scripts\python.exe -m pytest backend\tests\test_store.py backend\tests\test_api.py
 ```
 
 ### Dashboard on Vercel
@@ -443,9 +481,11 @@ deployment protection and keep the key private, or add proper user login. Rotate
 - **Private services are paid.** Render does not offer private services on the free plan, so
   MiniStack needs at least the Starter plan. Without MiniStack, shadow runs fail and every
   certificate is blocked (fail closed).
-- **SQLite is temporary.** Certificates, the audit log and the compare slots are stored in
-  `/app/data/ghostops.db` inside the container, which is erased on every deploy, restart and
-  free-plan spin-down. To keep them, attach a Render persistent disk (paid) at `/app/data`.
+- **SQLite is temporary.** Without `GHOSTOPS_DATABASE_URL`, certificates, the audit log and
+  the compare slots are stored in `/app/data/ghostops.db` inside the container, which is erased
+  on every deploy, restart and free-plan spin-down. Use a free Neon database
+  ([Keeping certificates](#keeping-certificates-free-postgres-on-neon)) or a paid Render disk
+  at `/app/data`.
 - **No Infracost.** Infracost v2 has only a browser OAuth login and no API key, so the image does
   not include it. Hosted certificates show cost as `null` with a note and never try to log in.
 - **Cold starts.** A free web service sleeps after about 15 minutes without traffic and takes

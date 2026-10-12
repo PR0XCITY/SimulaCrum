@@ -41,13 +41,15 @@ def main(argv: list[str]) -> int:
                 "Hosted mode requires GHOSTOPS_API_KEY for every POST/PUT/DELETE and disables "
                 "plan_path/tf_dir. For local use, keep the default host 127.0.0.1."
             )
+        from app.api import create_app
+
+        app = create_app()  # opens the database: SQLite, or Postgres if GHOSTOPS_DATABASE_URL is set
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 2
 
-    from app.api import create_app
-
-    config = uvicorn.Config(create_app(), host=args.host, port=args.port, log_level="info")
+    print(f"GhostOps storage: {app.state.store.backend}", flush=True)  # never the URL
+    config = uvicorn.Config(app, host=args.host, port=args.port, log_level="info")
     install_secret_filter()  # after uvicorn has configured its log handlers
     uvicorn.Server(config).run()
     return 0

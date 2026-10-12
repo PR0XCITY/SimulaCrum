@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -32,7 +33,7 @@ def setting(name: str, default: str | None = None) -> str | None:
 
 
 REPO_ROOT = ENV_FILE.parent
-SECRET_SETTINGS = ("GHOSTOPS_HMAC_SECRET", "GROQ_API_KEY", "GHOSTOPS_API_KEY")
+SECRET_SETTINGS = ("GHOSTOPS_HMAC_SECRET", "GROQ_API_KEY", "GHOSTOPS_API_KEY", "GHOSTOPS_DATABASE_URL")
 LOCAL_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000")
 
 
@@ -54,6 +55,9 @@ def check_required() -> None:
             problems.append("GHOSTOPS_API_KEY is not set (GHOSTOPS_HOSTED=1 requires it for every POST/PUT/DELETE).")
         elif len(key) < 24:
             problems.append("GHOSTOPS_API_KEY is shorter than 24 characters.")
+    database_url = setting("GHOSTOPS_DATABASE_URL")
+    if database_url and not database_url.startswith(("postgres://", "postgresql://")):
+        problems.append("GHOSTOPS_DATABASE_URL must be a postgresql:// URL (leave it empty to use SQLite).")
     if problems:
         raise ConfigError(
             "GhostOps cannot start:\n  - " + "\n  - ".join(problems) + "\n"
@@ -82,19 +86,35 @@ def cors_origins() -> list[str]:
 
 
 def db_path() -> Path:
+    """The SQLite file; not used when GHOSTOPS_DATABASE_URL selects Postgres (see app/store.py)."""
     return Path(setting("GHOSTOPS_DB_PATH") or REPO_ROOT / "data" / "ghostops.db")
+
+
+def secret_values() -> list[str]:
+    """Values that must never reach a log: secret settings and the database password."""
+    values = [v for v in (setting(n) for n in SECRET_SETTINGS) if v]
+    try:
+        password = urlsplit(setting("GHOSTOPS_DATABASE_URL") or "").password
+    except ValueError:
+        password = None
+    if password:
+        values += [password, unquote(password)]
+    return [v for v in values if len(v) >= 8]
+
+
+def redact(text: str) -> str:
+    for value in sorted(secret_values(), key=len, reverse=True):  # whole URL before its password
+        text = text.replace(value, "[redacted]")
+    return text
 
 
 class SecretRedactingFilter(logging.Filter):
     """Replace the values of secret settings in any log record (defence in depth)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        secrets = [v for v in (setting(n) for n in SECRET_SETTINGS) if v and len(v) >= 8]
-        if secrets:
+        if secret_values():
             message = record.getMessage()
-            redacted = message
-            for value in secrets:
-                redacted = redacted.replace(value, "[redacted]")
+            redacted = redact(message)
             if redacted != message:
                 record.msg, record.args = redacted, None
         return True

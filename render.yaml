@@ -25,6 +25,8 @@ services:
         sync: false
       - key: GROQ_API_KEY               # optional; without it explanations use the built-in template text
         sync: false
+      - key: GHOSTOPS_DATABASE_URL      # optional but recommended: free Neon Postgres URL so certificates
+        sync: false                     # survive restarts; empty = SQLite, wiped on every restart (README)
       - key: GHOSTOPS_MONTHLY_BUDGET_USD  # monthly cost increase above this blocks for review ("off" disables)
         value: "500"
       - key: GHOSTOPS_CORS_ORIGINS      # your Vercel URL(s), comma-separated, e.g. https://ghostops.vercel.app

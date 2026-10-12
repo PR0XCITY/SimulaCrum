@@ -9,6 +9,7 @@ from app import certificate
 from app.api import create_app
 from app.compare import diff, highlights, snapshot
 from app.store import Store
+from conftest import reopen
 
 SECRET = "compare-test-secret-" + "beef" * 8
 
@@ -122,10 +123,10 @@ def test_snapshot_totals_cost_per_service():
     assert snap["verdict"] == "BLOCKED_PENDING_REVIEW"
 
 
-# --- endpoints + SQLite ------------------------------------------------------------------------
+# --- endpoints + store (SQLite; Postgres too with TEST_DATABASE_URL) ------------------------------------------------------------------------
 
 
-def test_save_compare_and_delete_slots(tmp_path):
+def test_save_compare_and_delete_slots(make_store):
     checks = {
         "web-t3.micro": fake_check([f("GO-REL-004", "MEDIUM", "reliability")], 9.19),
         "web-m5.large": fake_check([f("GO-COST-001", "MEDIUM", "cost"), f("GO-REL-001", "MEDIUM", "reliability")], 160.2),
@@ -135,8 +136,8 @@ def test_save_compare_and_delete_slots(tmp_path):
         web = next(s for s in body["services"] if s["config"]["name"] == "web")
         return checks[f"web-{web['config']['instance_type']}"]
 
-    db = tmp_path / "ghostops.db"
-    with TestClient(create_app(store=Store(db), architecture_checker=checker)) as client:
+    store = make_store()
+    with TestClient(create_app(store=store, architecture_checker=checker)) as client:
         empty = client.get("/comparisons").json()
         assert empty["A"] is None and empty["B"] is None and empty["diff"] is None and empty["highlights"] is None
 
@@ -160,16 +161,16 @@ def test_save_compare_and_delete_slots(tmp_path):
         assert client.delete("/comparisons/B").status_code == 404
         assert client.get("/comparisons").json()["B"] is None
 
-    # kept in SQLite: a new app on the same file still has slot A
-    with TestClient(create_app(store=Store(db), architecture_checker=checker)) as client:
+    # kept in the database: a new app on the same database still has slot A
+    with TestClient(create_app(store=reopen(store), architecture_checker=checker)) as client:
         assert client.get("/comparisons").json()["A"]["architecture"] == BIG
 
 
-def test_invalid_slot_and_architecture_are_rejected(tmp_path):
+def test_invalid_slot_and_architecture_are_rejected(make_store):
     def never(body):
         raise AssertionError("must not run the check for an invalid request")
 
-    with TestClient(create_app(store=Store(tmp_path / "db"), architecture_checker=never)) as client:
+    with TestClient(create_app(store=make_store(), architecture_checker=never)) as client:
         assert client.put("/comparisons/C", json=SMALL).status_code == 422
         bad = client.put("/comparisons/A", json={"services": [{"type": "ec2", "config": {"count": 0}}]})
         assert bad.status_code == 422 and bad.json()["detail"]["errors"][0]["field"] == "count"

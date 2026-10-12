@@ -1,6 +1,5 @@
 import json
 import logging
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +13,7 @@ from app.certificate import build_certificate, verify
 from app.config import ConfigError, SecretRedactingFilter
 from app.shadow import ShadowResult
 from app.store import Store
+from conftest import raw_execute
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BACKEND = Path(__file__).resolve().parents[1]
@@ -47,8 +47,8 @@ def analyzer():
 
 
 @pytest.fixture
-def store(tmp_path):
-    return Store(tmp_path / "ghostops.db")
+def store(make_store):  # SQLite, and Postgres too when TEST_DATABASE_URL is set (see conftest.py)
+    return make_store()
 
 
 @pytest.fixture
@@ -236,12 +236,14 @@ def test_audit_log_is_append_only(client, store):
     cert = analyze(client, "bad_plan.json", "demo/bad").json()
     r = client.post(f"/certificates/{cert['plan_id']}/decision", json={"decision": "approve", "reviewer": "ana"})
     assert r.status_code == 200
-    db = sqlite3.connect(store.path)
-    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
-        db.execute("UPDATE audit_log SET decision = 'deny'")
-    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
-        db.execute("DELETE FROM audit_log")
-    db.close()
+    with pytest.raises(Exception, match="append-only"):  # sqlite3 / psycopg DatabaseError
+        raw_execute(store, "UPDATE audit_log SET decision = 'deny'")
+    with pytest.raises(Exception, match="append-only"):
+        raw_execute(store, "DELETE FROM audit_log")
+    if store.backend == "postgres":
+        with pytest.raises(Exception, match="append-only"):
+            raw_execute(store, "TRUNCATE audit_log")
+    assert [d["decision"] for d in store.decisions(cert["plan_id"])] == ["approve"]
 
 
 def test_auto_approved_certificates_take_no_decisions(client, store):
@@ -269,12 +271,10 @@ def test_decisions_on_an_earlier_version_are_not_the_current_decision(client, st
 
 
 def tamper(store, plan_id):
-    db = sqlite3.connect(store.path)
-    body = json.loads(db.execute("SELECT body FROM certificates WHERE plan_id = ?", (plan_id,)).fetchone()[0])
+    [row] = raw_execute(store, "SELECT body FROM certificates WHERE plan_id = ?", (plan_id,))
+    body = json.loads(row["body"])
     body["verdict"] = "AUTO_APPROVED"
-    db.execute("UPDATE certificates SET body = ? WHERE plan_id = ?", (json.dumps(body), plan_id))
-    db.commit()
-    db.close()
+    raw_execute(store, "UPDATE certificates SET body = ? WHERE plan_id = ?", (json.dumps(body), plan_id))
 
 
 def test_verify_detects_tampering_in_the_database(client, store):
@@ -375,10 +375,8 @@ def test_ghostops_command_is_installed():
     assert proc.returncode == 0 and "plan JSON file" in proc.stdout
 
 
-def test_summary_names_the_builder_design(tmp_path):
-    from app.store import Store
-
-    store = Store(tmp_path / "db")
+def test_summary_names_the_builder_design(make_store):
+    store = make_store()
     flags = [{"rule": "GO-REL-006", "severity": "LOW", "resource": "aws_instance.web[0]", "message": "m",
               "pillar": "reliability"}]
     store.save_certificate({
@@ -417,10 +415,8 @@ def _fake_cert(plan_id="c" * 64, verdict="AUTO_APPROVED"):
             "cost_delta": {"monthly_usd": 1.0}, "shadow_run": {"applied": True}, "architecture": None}
 
 
-def test_certify_runs_in_the_background_and_stores_the_certificate(tmp_path):
+def test_certify_runs_in_the_background_and_stores_the_certificate(make_store):
     import threading
-
-    from app.store import Store
 
     release = threading.Event()
     calls = []
@@ -431,7 +427,7 @@ def test_certify_runs_in_the_background_and_stores_the_certificate(tmp_path):
         return _fake_cert()
 
     body = {"services": [{"type": "s3", "config": {"name": "logs"}}]}
-    with TestClient(create_app(store=Store(tmp_path / "db"), architecture_analyzer=slow_analyzer)) as client:
+    with TestClient(create_app(store=make_store(), architecture_analyzer=slow_analyzer)) as client:
         started = client.post("/architectures/certify", json=body)
         assert started.status_code == 202  # returns at once, while the analysis is still running
         job = started.json()
