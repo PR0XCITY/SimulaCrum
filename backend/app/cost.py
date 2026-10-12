@@ -68,6 +68,28 @@ def find_infracost() -> str:
     return found
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill infracost and the plugin processes it started (infracost-parser-*,
+    infracost-provider-*). Killing only the parent leaves the plugins running, holding
+    the scan's temp directory and the output pipes."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        import signal
+
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # started with start_new_session=True
+        except OSError:
+            pass
+    if proc.poll() is None:
+        proc.kill()
+    proc.wait()
+
+
 def _run_infracost(args: list[str], *, cwd: str | None = None, timeout: float = 300) -> tuple[int, str, str]:
     """Run infracost non-interactively; (exit code, stdout, stderr).
 
@@ -78,7 +100,8 @@ def _run_infracost(args: list[str], *, cwd: str | None = None, timeout: float = 
     """
     env = dict(os.environ, BROWSER="none", NO_COLOR="1")
     proc = subprocess.Popen([find_infracost(), *args], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            start_new_session=sys.platform != "win32")
     out: list[bytes] = []
     err: list[bytes] = []
     prompted = threading.Event()
@@ -97,8 +120,7 @@ def _run_infracost(args: list[str], *, cwd: str | None = None, timeout: float = 
     while proc.poll() is None and not prompted.is_set() and time.monotonic() < deadline:
         time.sleep(0.05)
     if proc.poll() is None:
-        proc.kill()
-        proc.wait()
+        _kill_tree(proc)
         for r in readers:
             r.join(timeout=5)
         if prompted.is_set():
@@ -180,7 +202,9 @@ def scan(planned_values: dict[str, Any], *, terraform_version: str = "1.0.0", ti
     args = ["scan", "plan.json", "--json", "--no-color", "--currency", "USD"]
     if os.environ.get("INFRACOST_ORG"):
         args += ["--org", os.environ["INFRACOST_ORG"]]
-    with tempfile.TemporaryDirectory(prefix="ghostops-cost-") as tmp:
+    # ignore_cleanup_errors: a file still locked on Windows must not replace the real
+    # result (or the CostError) with a PermissionError from the cleanup.
+    with tempfile.TemporaryDirectory(prefix="ghostops-cost-", ignore_cleanup_errors=True) as tmp:
         Path(tmp, "plan.json").write_text(json.dumps(doc), encoding="utf-8")
         if usage_file:
             Path(tmp, "usage.yml").write_text(

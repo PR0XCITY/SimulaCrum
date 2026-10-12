@@ -1,3 +1,5 @@
+import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -213,3 +215,55 @@ def test_login_prompt_is_killed_immediately(monkeypatch):
     with pytest.raises(InfracostAuthError):
         cost._run_infracost(["-c", script], timeout=120)
     assert time.monotonic() - started < 10
+
+
+def test_timeout_kills_the_plugin_processes_too(monkeypatch, tmp_path):
+    # Stand-in for a hung `infracost scan`: it starts a plugin child that sits in the scan
+    # directory (like infracost-parser-terraform), then hangs. On timeout the whole tree
+    # must die, or the child keeps the directory locked on Windows.
+    monkeypatch.setattr(cost, "find_infracost", lambda: sys.executable)
+    work = tmp_path / "scan"
+    work.mkdir()
+    pid_file = tmp_path / "plugin.pid"
+    script = (
+        "import subprocess, sys, time; "
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], cwd=sys.argv[1]); "
+        "open(sys.argv[2], 'w').write(str(p.pid)); time.sleep(120)"
+    )
+    with pytest.raises(cost.CostError, match="timed out after 3s"):
+        cost._run_infracost(["-c", script, str(work), str(pid_file)], cwd=str(work), timeout=3)
+    plugin_pid = int(pid_file.read_text())
+
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            if sys.platform == "win32":
+                shutil.rmtree(work)  # fails while a live process has it as its working directory
+            else:
+                os.kill(plugin_pid, 0)  # raises once the plugin is gone
+                raise PermissionError("plugin still running")
+            break
+        except (PermissionError, OSError) as exc:
+            if isinstance(exc, ProcessLookupError):
+                break
+            if time.monotonic() > deadline:
+                raise AssertionError(f"plugin process {plugin_pid} survived the timeout") from exc
+            time.sleep(0.2)
+
+
+def test_locked_scan_dir_does_not_hide_the_cost_error(monkeypatch):
+    # A file still open in the scan directory when it is cleaned up (Windows: cannot be
+    # deleted) must not turn the CostError into a PermissionError crash.
+    handles = []
+
+    def hung_scan(args, *, cwd=None, timeout=300):
+        handles.append(open(Path(cwd, "plugin.lock"), "w"))
+        raise cost.CostError("infracost scan timed out after 300s")
+
+    monkeypatch.setattr(cost, "_run_infracost", hung_scan)
+    try:
+        with pytest.raises(cost.CostError, match="timed out"):
+            cost.scan({"root_module": {}})
+    finally:
+        for handle in handles:
+            handle.close()
