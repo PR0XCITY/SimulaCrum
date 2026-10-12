@@ -29,13 +29,16 @@ ACTIVE = ("queued", "running")
 
 class JobManager:
     def __init__(self, run: Callable[[dict[str, Any]], dict[str, Any]],
-                 on_error: Callable[[Exception], str]):
-        """run(architecture) -> stored certificate; on_error(exc) -> message for the dashboard."""
+                 on_error: Callable[[Exception], str], *, keep_result: bool = False, name: str = "certify"):
+        """run(architecture) -> stored certificate; on_error(exc) -> message for the dashboard.
+        keep_result: the job also returns run()'s whole result (the advisor), not just plan_id/verdict."""
         self._run = run
         self._on_error = on_error
+        self._keep_result = keep_result
+        self._name = name
         self._jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="certify")
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=name)
 
     @staticmethod
     def _key(architecture: dict[str, Any]) -> str:
@@ -48,7 +51,8 @@ class JobManager:
                 if job["key"] == key and job["status"] in ACTIVE:
                     return self._public(job)  # same design already in progress
             job = {"id": uuid.uuid4().hex, "key": key, "status": "queued", "created": time.time(),
-                   "started": None, "finished": None, "plan_id": None, "verdict": None, "error": None}
+                   "started": None, "finished": None, "plan_id": None, "verdict": None, "error": None,
+                   "result": None}
             self._jobs[job["id"]] = job
             self._trim()
         self._pool.submit(self._work, job["id"], architecture)
@@ -67,12 +71,15 @@ class JobManager:
             cert = self._run(architecture)
         except Exception as exc:  # reported to the dashboard, never swallowed
             message = self._on_error(exc)
-            log.warning("certify job %s failed: %s", job_id, message)
+            log.warning("%s job %s failed: %s", self._name, job_id, message)
             with self._lock:
                 job.update(status="error", error=message, finished=time.time())
             return
         with self._lock:
-            job.update(status="done", plan_id=cert["plan_id"], verdict=cert["verdict"], finished=time.time())
+            if self._keep_result:
+                job.update(status="done", result=cert, finished=time.time())
+            else:
+                job.update(status="done", plan_id=cert["plan_id"], verdict=cert["verdict"], finished=time.time())
 
     def _trim(self) -> None:
         done = [j for j in self._jobs.values() if j["status"] not in ACTIVE]
@@ -86,11 +93,14 @@ class JobManager:
             position = sum(1 for j in self._jobs.values()
                            if j["status"] in ACTIVE and j["created"] < job["created"])
         end = job["finished"] or now
-        return {
+        public = {
             "job_id": job["id"], "status": job["status"], "plan_id": job["plan_id"], "verdict": job["verdict"],
             "error": job["error"], "queue_position": position,
             "elapsed_s": round(end - (job["started"] or job["created"]), 1),
         }
+        if self._keep_result:
+            public["result"] = job["result"]
+        return public
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

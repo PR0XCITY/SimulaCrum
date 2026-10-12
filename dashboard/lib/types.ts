@@ -236,3 +236,41 @@ export interface VerifyResult {
 }
 
 export const SEVERITIES: Severity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
+
+// --- Trusted Advisor (POST /architectures/advise) --------------------------------------------
+// Every number is measured: each candidate change is planned with Terraform, re-scored with the
+// same OPA rules and priced with Infracost in one scan alongside the current design.
+
+export interface AdvisorImpact {
+  verdict_after: Verdict;
+  unblocks: boolean;
+  blocking_removed: number;
+  pillars: Record<Pillar, number>;        // score change (scores floor at 0)
+  points_removed: Record<Pillar, number>; // penalty points removed (no floor; negative = added)
+  pillars_after: Record<Pillar, number>;
+  cost_usd: number | null;                // monthly change; null when Infracost could not price it
+  monthly_after_usd: number | null;
+  fixed_rules: string[];
+  new_rules: string[];
+  tradeoffs: string[];
+}
+
+export interface AdvisorRecommendation {
+  id: string;
+  kind: "fix" | "save";
+  title: string;
+  summary: string;
+  changes: ConfigChange[];
+  rules: string[];
+  impact: AdvisorImpact;
+}
+
+export interface AdvisorResult {
+  baseline: { verdict: Verdict; pillars: Record<Pillar, number>; blocking: number; monthly_usd: number | null };
+  recommendations: AdvisorRecommendation[];
+  combined: { ids: string[]; changes: ConfigChange[]; impact: AdvisorImpact } | null;
+  cost_note: string | null;
+  candidates_measured: number;
+  candidates_failed: number;
+  duration_s: number;
+}

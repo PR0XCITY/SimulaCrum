@@ -2,7 +2,7 @@
 // dashboard switches to demo mode and reads /public/sample-certificates.
 
 import type {
-  ArchitectureError, ArchitectureService, CatalogService, Certificate, CertificateSummary, CheckResult, Decision,
+  AdvisorResult, ArchitectureError, ArchitectureService, CatalogService, Certificate, CertificateSummary, CheckResult, Decision,
   Pillar, PreviewResult, Severity, VerifyResult,
 } from "./types";
 import { SEVERITIES } from "./types";
@@ -64,6 +64,32 @@ export async function certify(arch: { services: ArchitectureService[] }, onProgr
   }
   if (job.status === "error" || !job.plan_id) throw new ApiError(job.error ?? "Certify failed");
   return api.getCertificate(job.plan_id);
+}
+
+export interface AdvisorJob extends CertifyJob {
+  result: AdvisorResult | null;
+}
+
+/** Ask the Trusted Advisor (a background job: every candidate change is planned and priced). */
+export async function advise(arch: { services: ArchitectureService[] }, onProgress?: (job: AdvisorJob) => void,
+                             isCancelled: () => boolean = () => false): Promise<AdvisorResult> {
+  let job = await api.startAdvise(arch);
+  let failures = 0;
+  onProgress?.(job);
+  while (job.status === "queued" || job.status === "running") {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    if (isCancelled()) throw new DOMException("cancelled", "AbortError");
+    try {
+      job = await api.adviceJob(job.job_id);
+      failures = 0;
+      onProgress?.(job);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) throw new ApiError("The API restarted. Ask the advisor again.");
+      if (++failures >= MAX_POLL_FAILURES) throw err;
+    }
+  }
+  if (job.status === "error" || !job.result) throw new ApiError(job.error ?? "The advisor failed");
+  return job.result;
 }
 
 export function isAbort(err: unknown): boolean {
@@ -155,6 +181,10 @@ export const api = {
   startCertify: (arch: { services: ArchitectureService[] }) =>
     postJson<CertifyJob>("/architectures/certify", arch, 30000),
   job: (jobId: string) => request<CertifyJob>(`/jobs/${jobId}`, {}, 15000),
+  // Trusted Advisor as a background job (1-3 min: plans and prices every candidate change).
+  startAdvise: (arch: { services: ArchitectureService[] }) =>
+    postJson<AdvisorJob>("/architectures/advise", arch, 30000),
+  adviceJob: (jobId: string) => request<AdvisorJob>(`/architectures/advise/${jobId}`, {}, 15000),
   // Compare slots, kept in SQLite. Saving runs the static check (~20-30 s).
   comparisons: () => request<Comparison>("/comparisons"),
   saveDesign: (slot: Slot, arch: { services: ArchitectureService[] }) =>

@@ -4,16 +4,19 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react";
 import { useMode } from "@/components/ModeProvider";
+import { AdvisorPanel } from "@/components/builder/AdvisorPanel";
 import { ArchitectureDiagram } from "@/components/builder/ArchitectureDiagram";
 import { ResultsPanel, type Async } from "@/components/builder/ResultsPanel";
 import { SaveSlots } from "@/components/builder/SaveSlots";
 import { ServiceCard } from "@/components/builder/ServiceCard";
 import { EmptyState, ErrorState, SkeletonBlock } from "@/components/states";
-import { ApiError, api, certify, isAbort } from "@/lib/api";
+import { ApiError, advise, api, certify, isAbort } from "@/lib/api";
 import {
   applyChanges, canApply, EXAMPLES, loadExample, newService, ownerMap, stripIndex, toArchitecture, type BuilderService,
 } from "@/lib/builder";
-import type { ArchitectureError, CatalogService, Certificate, CheckResult, ConfigChange, PreviewResult } from "@/lib/types";
+import type {
+  AdvisorResult, ArchitectureError, CatalogService, Certificate, CheckResult, ConfigChange, PreviewResult,
+} from "@/lib/types";
 
 const PREVIEW_DELAY_MS = 350;
 const CHECK_DELAY_MS = 2000;
@@ -34,6 +37,7 @@ export default function BuilderPage() {
   const [preview, setPreview] = useState<PreviewState>(null);
   const [check, setCheck] = useState<Async<CheckResult>>({ status: "idle" });
   const [full, setFull] = useState<Async<Certificate>>({ status: "idle" });
+  const [advice, setAdvice] = useState<Async<AdvisorResult>>({ status: "idle" });
   const previewCtl = useRef<AbortController | null>(null);
   const checkCtl = useRef<AbortController | null>(null);
 
@@ -111,6 +115,20 @@ export default function BuilderPage() {
     }, () => unmounted.current).then(
       (data) => !unmounted.current && setFull({ status: "ready", data, forKey }),
       (err) => !unmounted.current && !isAbort(err) && setFull({ status: "error", error: message(err), forKey }),
+    );
+  }, [architecture, key]);
+
+  // Trusted Advisor: also a background job (it plans and prices every candidate change).
+  const runAdvisor = useCallback(() => {
+    const forKey = key;
+    const startedAt = Date.now();
+    setAdvice({ status: "running", startedAt, forKey });
+    advise(architecture, (job) => {
+      const note = job.status === "queued" && job.queue_position ? "Waiting for another advisor run to finish first." : undefined;
+      if (!unmounted.current) setAdvice({ status: "running", startedAt, forKey, note });
+    }, () => unmounted.current).then(
+      (data) => !unmounted.current && setAdvice({ status: "ready", data, forKey }),
+      (err) => !unmounted.current && !isAbort(err) && setAdvice({ status: "error", error: message(err), forKey }),
     );
   }, [architecture, key]);
 
@@ -284,6 +302,11 @@ export default function BuilderPage() {
                              onRemove={() => setServices((prev) => prev.filter((p) => p.id !== s.id))} />
               ))}
             </div>
+          )}
+          {services.length > 0 && (
+            <AdvisorPanel state={advice} stale={advice.status === "ready" && advice.forKey !== key}
+                          disabled={invalid || !previewValid} onAsk={runAdvisor} onApply={onApplyFix}
+                          canApply={(changes) => canApply(services, changes)} />
           )}
           {preview?.forKey === key && preview.error && (
             <ErrorState title="Preview failed" detail={preview.error} hint="Check that the API is running." />

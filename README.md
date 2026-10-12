@@ -200,6 +200,30 @@ plan. Usage-based ones (S3, Lambda, DynamoDB) take optional monthly usage inputs
 requests, invocations) that are passed to Infracost; left blank, they are priced at zero usage
 and marked as a lower bound. The certificate records the usage assumptions it used.
 
+#### Trusted Advisor
+
+Below the service cards, **Ask the Advisor** answers "what should I change?" for the whole
+design. It does not guess: every candidate change is tried for real
+([`backend/app/advisor.py`](backend/app/advisor.py), `POST /architectures/advise`, a background
+job of about 1 to 3 minutes):
+
+1. Candidates come from fixed rules: the fix of every current finding (grouped when several
+   findings share one fix), one size smaller for EC2 (only if the stated expected CPU is 50% or
+   less) and RDS, and on-demand billing for provisioned DynamoDB tables.
+2. Each candidate is applied to a copy of the design, generated and planned with Terraform, and
+   re-scored with the same OPA rules, graph diff and pillar formula as the quick check.
+3. The current design and all candidates are priced in **one** Infracost scan (each plan wrapped
+   as its own module), so every price comes from the same price list and usage assumptions.
+
+Recommendations are grouped as **Fixes** (remove findings), **Savings** (cheaper, same scores)
+and **Trade-offs** (better in one way, worse in another, for example Multi-AZ: +10 reliability
+for +$28.58 a month). Changes that measure no improvement are left out. A summary at the top
+applies every trade-off-free recommendation together, measured as one more design. On the Risky
+example with a t3.medium and a db.t3.small it showed (real run): BLOCKED to AUTO-APPROVED,
+security 0 to 90, and $28.32 a month cheaper. **Apply** writes a recommendation into the service
+cards, and the quick check confirms it. Without an Infracost login, costs are unknown and only
+fixes are suggested.
+
 #### Compare two designs (`/compare`)
 
 **Save as A** and **Save as B** in the Builder keep the current design in SQLite (slots A and
@@ -359,6 +383,7 @@ Exit code 0 = auto-approved, 1 = blocked, 2 = error. The same works through the 
 | `POST /architectures/check` | Static check (no MiniStack, not signed, not stored) |
 | `POST /architectures/certify` | Starts the full pipeline as a background job (202); the same design while running returns the same job |
 | `GET /jobs/{job_id}` | Job status: queued (with queue position), running, done (plan id and verdict) or error |
+| `POST /architectures/advise`, `GET /architectures/advise/{job_id}` | Trusted Advisor as a background job; when done, `result` holds the measured recommendations |
 | `POST /architectures/analyze` | Full pipeline in one request; stores and returns a signed certificate (CLI and scripts) |
 | `POST /analyze` | Analyse a `terraform show -json` plan |
 | `GET /demos`, `POST /analyze/demo/{name}` | Run the bundled demos |

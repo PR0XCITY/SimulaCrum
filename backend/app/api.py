@@ -25,6 +25,9 @@ PUT  /comparisons/{A|B}               same body as /architectures/check: runs th
 DELETE /comparisons/{A|B}             empty a slot
 POST /architectures/certify           same body -> starts the full analysis as a background job (202)
 GET  /jobs/{job_id}                   job status: queued | running | done (plan_id, verdict) | error
+POST /architectures/advise            same body -> Trusted Advisor background job (202): every candidate
+                                      change is planned, re-scored and priced (app/advisor.py)
+GET  /architectures/advise/{job_id}   advisor job status; `result` holds the recommendations when done
 GET  /health
 
 CORS allows the dashboard at http://localhost:3000 plus any origins listed in
@@ -51,6 +54,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
+from app.advisor import advise
 from app.architecture import analyze_architecture, check_architecture, services_with_resources
 from app.catalog import catalog
 from app.compare import comparison, snapshot
@@ -128,7 +132,8 @@ def _tf_dir(value: str | None) -> str | None:
 
 def create_app(store: Store | None = None, analyzer: Analyzer = build_certificate,
                architecture_analyzer: Callable[..., dict[str, Any]] = analyze_architecture,
-               architecture_checker: Callable[..., dict[str, Any]] = check_architecture) -> FastAPI:
+               architecture_checker: Callable[..., dict[str, Any]] = check_architecture,
+               architecture_advisor: Callable[..., dict[str, Any]] = advise) -> FastAPI:
     check_required()  # refuse to start without the signing secret
 
     @asynccontextmanager
@@ -136,6 +141,7 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
         install_secret_filter()
         yield
         _app.state.jobs.shutdown()
+        _app.state.advisor_jobs.shutdown()
 
     app = FastAPI(title="GhostOps", version="0.7.0", lifespan=lifespan)
     is_hosted = hosted()
@@ -273,6 +279,35 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
         job = app.state.jobs.get(job_id)
         if job is None:
             raise HTTPException(404, "unknown job (the API may have restarted; check the Certificates page)")
+        return job
+
+    def _advisor_error(exc: Exception) -> str:
+        if isinstance(exc, ShadowError):
+            return f"could not plan the generated Terraform: {exc}"
+        log.exception("advisor job crashed", exc_info=exc)
+        return f"The advisor failed unexpectedly ({type(exc).__name__}); see the API log."
+
+    app.state.advisor_jobs = JobManager(architecture_advisor, _advisor_error, keep_result=True, name="advise")
+
+    @app.post("/architectures/advise", status_code=202)
+    async def advise_architecture(request: Request) -> dict[str, Any]:
+        """Trusted Advisor: measure candidate changes as a background job (1-3 min);
+        poll GET /architectures/advise/{job_id}, whose `result` holds the recommendations."""
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(422, "body must be JSON: {\"services\": [...]}") from None
+        try:
+            generate(body)
+        except ArchitectureError as exc:
+            raise HTTPException(422, {"message": "invalid architecture", "errors": exc.errors}) from None
+        return app.state.advisor_jobs.submit({"services": body["services"]})
+
+    @app.get("/architectures/advise/{job_id}")
+    def get_advice(job_id: str = PathParam(pattern=r"^[0-9a-f]{32}$")) -> dict[str, Any]:
+        job = app.state.advisor_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "unknown advisor job (the API may have restarted); ask the advisor again")
         return job
 
     @app.post("/architectures/analyze")
