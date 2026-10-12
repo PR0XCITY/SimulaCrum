@@ -1,0 +1,96 @@
+# Reusable GhostOps gate. Call it from a pull_request workflow, once per Terraform directory:
+#
+#   jobs:
+#     ghostops:
+#       uses: PR0XCITY/GhostOps/.github/workflows/ghostops-gate.yml@main
+#       with:
+#         tf_dir: infra/network
+#
+# The job plans tf_dir against a MiniStack service container with fake credentials (never
+# real AWS), runs the GhostOps CLI, writes a job summary (verdict, blocking findings, pillar
+# scores, cost) and FAILS when the verdict is BLOCKED_PENDING_REVIEW. Make the job a required
+# status check in branch protection so a blocked plan cannot be merged.
+# Infracost is not installed (OAuth login only), so the cost is reported as unknown.
+name: GhostOps gate
+
+on:
+  workflow_call:
+    inputs:
+      tf_dir:
+        description: Terraform directory in the calling repository
+        type: string
+        required: true
+      expect:
+        description: "Self-tests only: pass only if the verdict is this (e.g. BLOCKED_PENDING_REVIEW)"
+        type: string
+        default: ""
+      ghostops_repository:
+        description: GhostOps repository to run (default PR0XCITY/GhostOps)
+        type: string
+        default: ""
+      ghostops_ref:
+        description: GhostOps git ref to run (default main)
+        type: string
+        default: ""
+    secrets:
+      GROQ_API_KEY:
+        required: false
+      GHOSTOPS_SIGNING_KEY:
+        required: false
+      GHOSTOPS_HMAC_SECRET:
+        required: false
+    outputs:
+      verdict:
+        value: ${{ jobs.gate.outputs.verdict }}
+      plan_id:
+        value: ${{ jobs.gate.outputs.plan_id }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: GhostOps gate (${{ inputs.tf_dir }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }}
+      plan_id: ${{ steps.gate.outputs.plan-id }}
+    services:
+      ministack:
+        image: ministackorg/ministack:latest
+        ports:
+          - 4566:4566
+        env:
+          GATEWAY_PORT: "4566"
+    steps:
+      - name: Check out the code under review
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out GhostOps
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.ghostops_repository || 'PR0XCITY/GhostOps' }}
+          ref: ${{ inputs.ghostops_ref || 'main' }}
+          path: .ghostops
+          persist-credentials: false
+
+      - name: GhostOps gate
+        id: gate
+        uses: ./.ghostops/.github/actions/ghostops-gate
+        with:
+          tf-dir: ${{ inputs.tf_dir }}
+          ghostops-path: .ghostops
+          expect: ${{ inputs.expect }}
+          groq-api-key: ${{ secrets.GROQ_API_KEY }}
+          signing-key: ${{ secrets.GHOSTOPS_SIGNING_KEY }}
+          hmac-secret: ${{ secrets.GHOSTOPS_HMAC_SECRET }}
+
+      - name: Upload the certificate
+        if: always() && steps.gate.outputs.certificate != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghostops-certificate-${{ github.job }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+          path: ${{ steps.gate.outputs.certificate }}

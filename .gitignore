@@ -32,3 +32,7 @@ node_modules/
 .claude/
 CLAUDE.md
 skills-lock.json
+
+# GhostOps gate outputs (CI runner and scripts/safe-apply.ps1)
+ghostops-gate-out/
+.ghostops-apply/

@@ -391,6 +391,122 @@ PASS  Dashboard ESLint           6.5s  clean
 ALL CHECKS PASSED
 ```
 
+## Gating agents and pull requests
+
+A dashboard only helps if someone looks at it. These pieces put GhostOps *in the path*, so a
+risky plan cannot be merged or applied without a human decision. All of them only ever talk
+to MiniStack with fake keys; none of them gives GhostOps real AWS credentials.
+
+| Gate | Where | What it blocks |
+|---|---|---|
+| CI gate | [`.github/workflows/ghostops-gate.yml`](.github/workflows/ghostops-gate.yml) + [`.github/actions/ghostops-gate`](.github/actions/ghostops-gate/action.yml) | Merging a pull request whose Terraform is `BLOCKED_PENDING_REVIEW` |
+| Agent gate | MCP server `python -m app.mcp_gate` ([`backend/app/mcp_gate.py`](backend/app/mcp_gate.py)) | An AI agent applying a plan without an approved certificate |
+| Pre-apply wrapper | [`scripts/safe-apply.ps1`](scripts/safe-apply.ps1) | `terraform apply` of a plan that is blocked and not approved (demos only) |
+
+The shared logic is in [`backend/app/gate.py`](backend/app/gate.py). A plan **may be applied**
+only if its certificate has a valid signature, is for exactly that plan (same `plan_id`), and
+is either `AUTO_APPROVED` or `BLOCKED_PENDING_REVIEW` with an **approve** as the latest
+decision on that certificate version in the audit log. A deny, no decision, an invalid
+signature, a different plan or any error means no.
+
+### CI gate (GitHub Actions)
+
+Call the reusable workflow from your repository, once per Terraform directory:
+
+```yaml
+# .github/workflows/infra.yml in your repository
+on: pull_request
+jobs:
+  ghostops:
+    uses: PR0XCITY/GhostOps/.github/workflows/ghostops-gate.yml@main
+    with:
+      tf_dir: infra/network
+    secrets:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}                  # optional
+      GHOSTOPS_SIGNING_KEY: ${{ secrets.GHOSTOPS_SIGNING_KEY }}  # optional, Ed25519
+```
+
+The job starts a `ministackorg/ministack` service container, installs Terraform 1.16.4 and
+OPA 1.21.1 (pinned, SHA-256 checked, the same as the Dockerfile), runs `terraform init/plan`
+and `show -json` in a scrubbed copy of `tf_dir` with every AWS endpoint forced onto MiniStack,
+then runs `ghostops analyze` (full pipeline, shadow apply included). It **fails when the verdict
+is `BLOCKED_PENDING_REVIEW`** (or on any error), writes a job summary with the verdict, the
+blocking findings, the pillar scores and the cost, and uploads the certificate JSON as an
+artifact. Make the job a required status check in branch protection to stop the merge.
+
+- Infracost has no API key (OAuth login only), so CI reports the cost as unknown; the budget
+  gate never fires on an unknown cost.
+- With `GHOSTOPS_SIGNING_KEY` (Ed25519) the uploaded certificate can be checked later by anyone
+  with the public key. Without it (or `GHOSTOPS_HMAC_SECRET`) each run signs with a random
+  per-run HMAC secret: the summary and the verdict are still right, but the certificate
+  cannot be verified afterwards.
+- A blocked PR is reviewed like any other code: fix the findings, or a maintainer overrides
+  the required check deliberately. The CI gate does not read the local audit log.
+
+This repository gates itself with [`ghostops-pr.yml`](.github/workflows/ghostops-pr.yml):
+`demo/good` must pass as a normal gate, and `demo/bad` runs with `expect:
+BLOCKED_PENDING_REVIEW` as a self-test proving the gate still blocks. The same runner works
+locally (MiniStack running):
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m app.gate ci --tf ..\demo\bad --no-groq    # exit 1, BLOCKED
+..\.venv\Scripts\python.exe -m app.gate ci --tf ..\demo\good --no-groq   # exit 0, AUTO_APPROVED
+```
+
+### Agent gate (MCP server)
+
+`python -m app.mcp_gate` is a small MCP server (stdio, no extra dependencies) with two tools:
+
+| Tool | Returns |
+|---|---|
+| `ghostops_check_plan(plan_json_path, tf_dir)` | `verdict`, `certificate_id`, `blocking_findings`, `pillar_scores`, cost, `apply_allowed`, `reason`, `dashboard_url` |
+| `ghostops_get_certificate(plan_id)` | the same for a stored certificate, with its current review state |
+
+It uses the local API (`GHOSTOPS_API_URL`, default `http://127.0.0.1:8000`) when it is running,
+otherwise the same pipeline and database in-process, so certificates show up in the dashboard
+either way. A plan that already has a certificate is not re-analysed (that would sign a new
+version and orphan its review). Errors are returned as tool errors that say not to apply.
+
+Register it with Claude Code (or any MCP client) in the project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ghostops": {
+      "command": "D:\\Projects\\GhostOps\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "app.mcp_gate"]
+    }
+  }
+}
+```
+
+and tell the agent, for example in its instructions file: *Never run `terraform apply`
+directly. Run `terraform plan -out tf.plan` and `terraform show -json tf.plan > plan.json`,
+call `ghostops_check_plan`, and apply only that saved plan, only if `apply_allowed` is true.
+If it is blocked, stop and give me the `dashboard_url`.* The server sends the same rule as its
+MCP `instructions`. An instruction is not enforcement on its own: pair it with a permission
+rule that denies the agent `terraform apply` and lets it run `scripts/safe-apply.ps1` instead.
+
+### Pre-apply wrapper (`scripts/safe-apply.ps1`)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\safe-apply.ps1 -TfDir demo\good          # applies to MiniStack
+powershell -ExecutionPolicy Bypass -File scripts\safe-apply.ps1 -TfDir demo\bad           # REFUSED, prints the review link
+# approve it in the dashboard, then apply exactly the plan that was reviewed:
+powershell -ExecutionPolicy Bypass -File scripts\safe-apply.ps1 -TfDir demo\bad -Resume
+```
+
+It refuses any directory outside this repository's `demo\` folder and any MiniStack endpoint
+that is not on loopback, removes every `AWS_*` variable, writes the MiniStack override file,
+makes a **saved** plan, certifies `terraform show -json` of that file and applies that same
+file only on an allowed decision. A refused plan is kept in `.ghostops-apply\` for `-Resume`.
+Every certification resets MiniStack (the shadow run), so demo applies are short-lived.
+
+**This wrapper is a demonstration for MiniStack only.** Pointing the idea at a real cloud
+account needs your own review: real credentials handling, who may approve, where the audit
+log lives, and that the guards cannot be bypassed. GhostOps never applies anything itself.
+
 ## Deploying (Vercel + Render)
 
 GhostOps is built as a local tool. It can also run online: the dashboard on Vercel and the API

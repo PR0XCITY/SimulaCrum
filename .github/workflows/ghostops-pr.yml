@@ -1,0 +1,32 @@
+# GhostOps gating its own pull requests with the reusable gate on the bundled demos:
+#   demo/good must be AUTO_APPROVED (a normal gate: a block fails this check);
+#   demo/bad  must be BLOCKED_PENDING_REVIEW (a self-test: proves the gate still blocks).
+# A real repository calls ghostops-gate.yml without `expect`, so any block fails the PR.
+name: GhostOps PR gate
+
+on:
+  pull_request:
+    paths:
+      - "demo/**"
+      - "backend/**"
+      - ".github/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  good:
+    uses: ./.github/workflows/ghostops-gate.yml
+    with:
+      tf_dir: demo/good
+      ghostops_repository: ${{ github.repository }}
+      ghostops_ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+  bad-must-block:
+    uses: ./.github/workflows/ghostops-gate.yml
+    with:
+      tf_dir: demo/bad
+      expect: BLOCKED_PENDING_REVIEW
+      ghostops_repository: ${{ github.repository }}
+      ghostops_ref: ${{ github.event.pull_request.head.sha || github.sha }}
