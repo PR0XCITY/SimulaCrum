@@ -12,6 +12,7 @@ import { formatTimestamp, formatUsd, signatureAlgLabel } from "@/lib/format";
 import { useCertificate, type CertificateDetail } from "@/lib/useCertificates";
 import type { Certificate, Decision } from "@/lib/types";
 import { SEVERITIES } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 function Panel({ title, children, className = "", tone = "neutral" }: {
   title: React.ReactNode; children: React.ReactNode; className?: string; tone?: "neutral" | "alarm";
@@ -245,7 +246,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
                 recorded permanently.
               </p>
               <div className="grid grid-cols-2 gap-2">
-                <button
+                <button {...noFormRestore}
                   type="button"
                   onClick={() => setPending(null)}
                   disabled={busy}
@@ -253,7 +254,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
                 >
                   Cancel
                 </button>
-                <button
+                <button {...noFormRestore}
                   type="button"
                   onClick={() => void confirm()}
                   disabled={busy}
@@ -267,7 +268,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-2">
-              <button
+              <button {...noFormRestore}
                 type="button"
                 onClick={() => request("approve")}
                 disabled={disabled}
@@ -275,7 +276,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
               >
                 <CheckCircle size={16} weight="bold" aria-hidden="true" /> Approve
               </button>
-              <button
+              <button {...noFormRestore}
                 type="button"
                 onClick={() => request("deny")}
                 disabled={disabled}

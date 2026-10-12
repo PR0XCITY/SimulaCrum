@@ -6,6 +6,7 @@ import { ArrowRight, FloppyDisk } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { SLOTS, type Slot } from "@/lib/compare";
 import type { ArchitectureService } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 type SlotState =
   | { status: "idle" }
@@ -54,7 +55,7 @@ export function SaveSlots({ architecture, archKey, disabled }: {
         )}
       </span>
       {SLOTS.map((slot) => (
-        <button key={slot} type="button" onClick={() => save(slot)} disabled={disabled || busy}
+        <button {...noFormRestore} key={slot} type="button" onClick={() => save(slot)} disabled={disabled || busy}
                 className="flex items-center gap-1.5 rounded-md border border-cyan-400/50 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors duration-150 hover:bg-cyan-400/10 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40">
           <FloppyDisk size={13} aria-hidden="true" /> Save as {slot}
         </button>

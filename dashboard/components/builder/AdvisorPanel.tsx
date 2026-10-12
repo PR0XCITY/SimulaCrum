@@ -6,6 +6,7 @@ import { ErrorState, SkeletonBlock } from "@/components/states";
 import { formatUsd } from "@/lib/format";
 import { PILLARS, type AdvisorImpact, type AdvisorRecommendation, type AdvisorResult, type ConfigChange, type Pillar, type Verdict } from "@/lib/types";
 import type { Async } from "@/components/builder/ResultsPanel";
+import { noFormRestore } from "@/lib/dom";
 
 const PILLAR_LABEL: Record<Pillar, string> = {
   security: "Security", reliability: "Reliability", cost: "Cost", performance: "Performance",
@@ -75,7 +76,7 @@ function Recommendation({ rec, onApply, canApply }: {
         </p>
         <ImpactChips impact={rec.impact} />
       </div>
-      <button type="button" onClick={() => onApply(rec.changes)} disabled={!canApply(rec.changes)}
+      <button {...noFormRestore} type="button" onClick={() => onApply(rec.changes)} disabled={!canApply(rec.changes)}
               className="h-fit shrink-0 rounded-md border border-cyan-500/40 px-2.5 py-1 text-xs text-cyan-200 transition-colors duration-150 hover:bg-cyan-500/10 disabled:opacity-40">
         Apply
       </button>
@@ -115,7 +116,7 @@ function Combined({ result, onApply, canApply }: {
         <p className="text-sm font-medium text-zinc-100">
           Apply the {n} recommended change{n === 1 ? "" : "s"} without trade-offs
         </p>
-        <button type="button" onClick={() => onApply(combined.changes)} disabled={!canApply(combined.changes)}
+        <button {...noFormRestore} type="button" onClick={() => onApply(combined.changes)} disabled={!canApply(combined.changes)}
                 className="ml-auto rounded-md bg-cyan-500 px-3 py-1.5 text-xs font-medium text-zinc-950 transition-colors duration-150 hover:bg-cyan-400 disabled:opacity-40">
           Apply All {n}
         </button>
@@ -169,7 +170,7 @@ export function AdvisorPanel({ state, stale, disabled, onAsk, onApply, canApply 
       <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5">
         <Compass size={16} className="text-cyan-400" aria-hidden="true" />
         <h2 className="text-sm font-medium text-zinc-300">Trusted Advisor</h2>
-        <button type="button" onClick={onAsk} disabled={disabled || running}
+        <button {...noFormRestore} type="button" onClick={onAsk} disabled={disabled || running}
                 className="ml-auto rounded-md border border-cyan-500/50 px-3 py-1.5 text-xs font-medium text-cyan-200 transition-colors duration-150 hover:bg-cyan-500/10 disabled:opacity-40">
           {running ? "Measuring..." : result ? "Ask Again" : "Ask the Advisor"}
         </button>

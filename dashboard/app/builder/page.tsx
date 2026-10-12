@@ -17,6 +17,7 @@ import {
 import type {
   AdvisorResult, ArchitectureError, CatalogService, Certificate, CheckResult, ConfigChange, PreviewResult,
 } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 const PREVIEW_DELAY_MS = 350;
 const CHECK_DELAY_MS = 2000;
@@ -240,7 +241,7 @@ export default function BuilderPage() {
             <h2 className="border-b border-line px-3 py-2 text-xs font-medium text-zinc-400">Load Example</h2>
             <div className="flex flex-col gap-1.5 p-2">
               {(Object.keys(EXAMPLES) as ("risky" | "safe")[]).map((name) => (
-                <button key={name} type="button" disabled={catalog.status !== "ready"}
+                <button {...noFormRestore} key={name} type="button" disabled={catalog.status !== "ready"}
                         onClick={() => catalog.status === "ready" && replaceWith(loadExample(name, catalog.data), EXAMPLES[name].label)}
                         className={`rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors duration-150 disabled:opacity-40 ${
                           name === "risky" ? "border-red-500/40 text-red-200 hover:bg-red-500/10" : "border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10"

@@ -9,6 +9,7 @@ import { formatUsd } from "@/lib/format";
 import { costByService, type ServiceCost } from "@/lib/builder";
 import { PillarPanel } from "@/components/builder/PillarPanel";
 import type { ArchitectureServiceInfo, Certificate, CheckResult, ConfigChange, RiskFlag, Verdict } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 export type Async<T> =
   | { status: "idle" }
@@ -128,7 +129,7 @@ function FlagList({ flags, onApply, canApply, busy }: {
                   <code key={j} className="block break-all font-mono text-[11px] text-cyan-200/90" translate="no">{changeText(c)}</code>
                 ))}
                 {applicable && (
-                  <button type="button" disabled={busy} onClick={() => onApply(changes)}
+                  <button {...noFormRestore} type="button" disabled={busy} onClick={() => onApply(changes)}
                           className="w-max rounded-md border border-cyan-400/60 px-2.5 py-1 text-xs font-medium text-cyan-200 transition-colors duration-150 hover:bg-cyan-400/10 active:translate-y-px disabled:opacity-40">
                     Apply Fix
                   </button>
@@ -226,7 +227,7 @@ export function ResultsPanel({
           {check.status === "ready" && checkFresh && `Checked in ${check.data.duration_s}s`}
           {check.status === "ready" && !checkFresh && !invalid && "Changes pending…"}
         </span>
-        <button type="button" onClick={onAnalyze} disabled={!hasServices || invalid || full.status === "running"}
+        <button {...noFormRestore} type="button" onClick={onAnalyze} disabled={!hasServices || invalid || full.status === "running"}
                 className="flex items-center gap-1.5 rounded-md bg-cyan-400 px-3 py-1.5 text-xs font-medium text-zinc-950 transition-colors duration-150 hover:bg-cyan-300 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40">
           <SealCheck size={14} weight="bold" aria-hidden="true" /> {full.status === "running" ? "Certifying…" : "Certify"}
         </button>

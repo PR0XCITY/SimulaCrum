@@ -8,6 +8,7 @@ import { formatTimestamp, formatUsd, signatureAlgLabel } from "@/lib/format";
 import { useCertificate } from "@/lib/useCertificates";
 import type { Certificate, ConfigChange, Severity } from "@/lib/types";
 import { SEVERITIES } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 // Print-friendly report: a light "paper" document (exception to the dark theme, because it
 // is meant to be printed or saved as PDF). App chrome is hidden in print via print:hidden.
@@ -196,7 +197,7 @@ export default function ReportPage() {
           <ArrowLeft size={14} aria-hidden="true" /> Back to Certificate
         </Link>
         <h1 className="sr-only">Certificate Report</h1>
-        <button type="button" onClick={() => window.print()} disabled={state.status !== "ready"}
+        <button {...noFormRestore} type="button" onClick={() => window.print()} disabled={state.status !== "ready"}
                 className="ml-auto flex items-center gap-1.5 rounded-md bg-cyan-400 px-3 py-1.5 text-sm font-medium text-zinc-950 transition-colors duration-150 hover:bg-cyan-300 active:translate-y-px disabled:opacity-40">
           <Printer size={15} aria-hidden="true" /> Print / Save as PDF
         </button>

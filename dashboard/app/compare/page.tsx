@@ -13,6 +13,7 @@ import { api } from "@/lib/api";
 import { SLOTS, type Comparison, type SavedDesign, type Slot } from "@/lib/compare";
 import { formatTimestamp, formatUsd } from "@/lib/format";
 import { PILLARS, SEVERITIES, type Pillar } from "@/lib/types";
+import { noFormRestore } from "@/lib/dom";
 
 const PILLAR_META: Record<Pillar, { label: string; icon: Icon }> = {
   security: { label: "Security", icon: ShieldCheck },
@@ -95,7 +96,7 @@ function DesignCard({ design, rival, cheaper, fewerRisks, onRemove, removing }: 
                 className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-raised hover:text-zinc-100">
             <PencilSimple size={13} aria-hidden="true" /> Open in Builder
           </Link>
-          <button type="button" onClick={onRemove} disabled={removing} aria-label={`Remove design ${design.slot}`}
+          <button {...noFormRestore} type="button" onClick={onRemove} disabled={removing} aria-label={`Remove design ${design.slot}`}
                   className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-raised hover:text-zinc-200 disabled:opacity-40">
             <Trash size={14} aria-hidden="true" />
           </button>
