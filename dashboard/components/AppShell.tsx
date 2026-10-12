@@ -15,13 +15,19 @@ const NAV = [
 function ModeIndicator() {
   const { mode, waking, recheck } = useMode();
   if (mode === "checking") {
-    return <span className="font-mono text-xs text-zinc-500">{waking ? "Waking up the API…" : "Connecting…"}</span>;
+    return (
+      <span className="font-mono text-xs text-zinc-500">
+        <span className="sm:hidden">…</span>
+        <span className="hidden sm:inline">{waking ? "Waking up the API…" : "Connecting…"}</span>
+      </span>
+    );
   }
   if (mode === "live") {
     return (
       <span className="flex items-center gap-2 font-mono text-xs text-zinc-400" title={API_BASE}>
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
-        API live
+        {/* the dot alone on phones; the words stay available to screen readers */}
+        <span className="sr-only sm:not-sr-only">API live</span>
       </span>
     );
   }
@@ -34,7 +40,8 @@ function ModeIndicator() {
       aria-label="Demo mode: API unreachable. Retry connection"
     >
       <span className="h-1.5 w-1.5 rounded-full bg-amber-300" aria-hidden="true" />
-      Demo mode
+      <span className="sm:hidden">Demo</span>
+      <span className="hidden sm:inline">Demo mode</span>
     </button>
   );
 }
@@ -51,10 +58,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         Skip to Content
       </a>
       <header className="sticky top-0 z-20 border-b print:hidden border-line bg-canvas/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-8 px-4 md:px-6">
+        <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4 sm:gap-8 md:px-6">
           <Link href="/" className="flex items-center gap-2 text-zinc-100" aria-label="GhostOps home">
             <ShieldCheckered size={20} weight="duotone" className="text-cyan-400" aria-hidden="true" />
-            <span className="font-mono text-sm font-semibold tracking-tight" translate="no">ghostops</span>
+            <span className="hidden font-mono text-sm font-semibold tracking-tight sm:inline" translate="no">ghostops</span>
           </Link>
           <nav className="flex items-center gap-1" aria-label="Main">
             {NAV.map((item) => {
@@ -64,7 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={item.href}
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                  className={`rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ease-[var(--ease-snap)] ${
+                  className={`rounded-md px-2 py-1.5 text-sm transition-colors sm:px-3 duration-150 ease-[var(--ease-snap)] ${
                     active ? "bg-raised text-zinc-100" : "text-zinc-400 hover:bg-raised/60 hover:text-zinc-100"
                   }`}
                 >
@@ -73,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto shrink-0">
             <ModeIndicator />
           </div>
         </div>
