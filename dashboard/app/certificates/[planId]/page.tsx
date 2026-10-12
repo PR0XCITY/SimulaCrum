@@ -286,7 +286,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
             </div>
           )}
           <p className="text-[11px] leading-relaxed text-zinc-500">
-            Decisions go to the append-only audit log. GhostOps never applies changes to any real system.
+            Decisions go to the append-only audit log. SimulaCrum never applies changes to any real system.
           </p>
         </div>
       )}
@@ -295,7 +295,7 @@ function DecisionPanel({ detail, demo, onDecided }: { detail: CertificateDetail;
         <div aria-live="polite">
           {!blocked && (
             <p className="px-4 pb-3 pt-1 text-sm text-emerald-300/90">
-              Auto-approved by GhostOps policy. No human review is needed or possible.
+              Auto-approved by SimulaCrum policy. No human review is needed or possible.
             </p>
           )}
           {decisions.length === 0 ? (
@@ -443,7 +443,7 @@ export default function CertificatePage() {
               <p className="text-[11px] text-zinc-500">
                 {cert.signature_alg === "ed25519"
                   ? "Public-key signature: anyone can check it offline with GET /public-key and scripts/verify_certificate.py."
-                  : "Shared-secret signature: only the GhostOps server can check it."}
+                  : "Shared-secret signature: only the SimulaCrum server can check it."}
               </p>
             </div>
           </Panel>

@@ -206,7 +206,7 @@ export default function BuilderPage() {
       <div className="flex flex-col gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Architecture Builder</h1>
         <ErrorState title="The builder needs the live API"
-                    detail="Demo mode: the GhostOps API is not reachable, and every change here is generated and analysed by it."
+                    detail="Demo mode: the SimulaCrum API is not reachable, and every change here is generated and analysed by it."
                     hint="Start it with python -m app.server, then reload. The sample certificates are still on the Certificates page." />
       </div>
     );
@@ -291,7 +291,7 @@ export default function BuilderPage() {
           {services.length === 0 ? (
             <div className="rounded-md border border-dashed border-line-strong">
               <EmptyState title="No Services Yet"
-                          body="Add a service from the palette, or load the risky or safe example to see how GhostOps reacts." />
+                          body="Add a service from the palette, or load the risky or safe example to see how SimulaCrum reacts." />
             </div>
           ) : (
             <div className="grid min-w-0 gap-3 2xl:grid-cols-2">

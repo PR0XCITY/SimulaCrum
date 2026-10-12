@@ -282,10 +282,10 @@ export default function ComparePage() {
       </div>
 
       {mode === "demo" ? (
-        <EmptyState title="Compare Needs the API" body="Saved designs live in the GhostOps API's SQLite database. Start the API (python -m app.server) and reload." />
+        <EmptyState title="Compare Needs the API" body="Saved designs live in the SimulaCrum API's SQLite database. Start the API (python -m app.server) and reload." />
       ) : state.status === "error" ? (
         <ErrorState title="Could not load the saved designs" detail={state.error}
-                    hint="Check that the GhostOps API is running, then retry." onRetry={retry} />
+                    hint="Check that the SimulaCrum API is running, then retry." onRetry={retry} />
       ) : !data ? (
         <div className="grid gap-4 md:grid-cols-2" aria-busy="true">
           <SkeletonBlock className="h-80" /><SkeletonBlock className="h-80" />

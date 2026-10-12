@@ -84,7 +84,7 @@ def test_correct_key_is_accepted(client, analyzer):
 def test_server_paths_are_refused(client, analyzer, kwargs):
     r = client.post("/analyze", headers=KEY, **kwargs)
     assert r.status_code == 403, r.text
-    assert "disabled on a hosted GhostOps" in r.json()["detail"]
+    assert "disabled on a hosted SimulaCrum" in r.json()["detail"]
     assert analyzer.calls == []
 
 
@@ -159,6 +159,6 @@ def test_hosted_cost_note_has_no_login_steps(monkeypatch):
     monkeypatch.setattr(certificate, "plan_cost", no_login)
     cost, breakdown = certificate.cost_section(GOOD_PLAN)
     assert cost["monthly_usd"] is None and breakdown == []
-    assert "not available on a hosted GhostOps" in cost["note"] and "auth login" not in cost["note"]
+    assert "not available on a hosted SimulaCrum" in cost["note"] and "auth login" not in cost["note"]
     monkeypatch.setenv("GHOSTOPS_HOSTED", "0")
     assert "infracost auth login" in certificate.cost_section(GOOD_PLAN)[0]["note"]

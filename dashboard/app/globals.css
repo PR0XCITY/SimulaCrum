@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* GhostOps console theme: dark only (theme lock), zinc neutrals, one interactive
+/* SimulaCrum console theme: dark only (theme lock), zinc neutrals, one interactive
    accent (cyan). Status colours are semantic and never decorative. */
 @theme inline {
   --font-sans: var(--font-geist-sans);

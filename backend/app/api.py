@@ -70,10 +70,10 @@ from app.store import Store, open_store
 log = logging.getLogger("ghostops.api")
 API_KEY_HEADER = "X-GhostOps-Key"
 MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-HOSTED_PATHS_REFUSED = "plan_path and tf_dir are disabled on a hosted GhostOps; upload the plan JSON instead"
+HOSTED_PATHS_REFUSED = "plan_path and tf_dir are disabled on a hosted SimulaCrum; upload the plan JSON instead"
 MAX_PLAN_BYTES = 20 * 1024 * 1024
 PLAN_ID = PathParam(pattern=r"^[0-9a-f]{64}$", description="sha256 plan id")
-NO_APPLY_NOTE = "Recorded in the audit log only. GhostOps never applies changes to any real system."
+NO_APPLY_NOTE = "Recorded in the audit log only. SimulaCrum never applies changes to any real system."
 _ROOT = Path(__file__).resolve().parents[2]
 DEMOS = {  # name -> (plan JSON, Terraform dir for the shadow run, description)
     "bad": (_ROOT / "backend" / "tests" / "fixtures" / "bad_plan.json", _ROOT / "demo" / "bad",
@@ -143,7 +143,7 @@ def create_app(store: Store | None = None, analyzer: Analyzer = build_certificat
         _app.state.jobs.shutdown()
         _app.state.advisor_jobs.shutdown()
 
-    app = FastAPI(title="GhostOps", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="SimulaCrum", version="0.7.0", lifespan=lifespan)
     is_hosted = hosted()
     api_key = (setting("GHOSTOPS_API_KEY") or "").encode() if is_hosted else b""
 

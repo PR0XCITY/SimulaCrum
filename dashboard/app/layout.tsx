@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GhostOps",
+  title: "SimulaCrum",
   description: "Risk certificates for Terraform plans: policy, blast radius, shadow run and cost.",
   // The UI is already dark: ask the Dark Reader extension not to restyle it.
   // (Next.js drops empty values; Dark Reader only checks the tag exists.)

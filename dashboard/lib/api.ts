@@ -1,4 +1,4 @@
-// Talks to the GhostOps FastAPI backend. If the API is unreachable, the
+// Talks to the SimulaCrum FastAPI backend. If the API is unreachable, the
 // dashboard switches to demo mode and reads /public/sample-certificates.
 
 import type {
@@ -107,7 +107,7 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs = 1500
   } catch {
     if (outer?.aborted) throw new DOMException("superseded", "AbortError"); // a newer request replaced this one
     const reason = controller.signal.aborted ? `timed out after ${Math.round(timeoutMs / 1000)}s` : "unreachable";
-    throw new ApiError(`GhostOps API ${reason} (${API_BASE})`);
+    throw new ApiError(`SimulaCrum API ${reason} (${API_BASE})`);
   } finally {
     clearTimeout(timer);
     outer?.removeEventListener("abort", onOuterAbort);

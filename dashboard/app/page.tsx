@@ -168,7 +168,7 @@ export default function Home() {
         <div className="flex max-w-2xl flex-col gap-1">
           <h1 className="text-balance text-2xl font-semibold tracking-tight text-zinc-50">Risk Certificates</h1>
           <p className="text-sm text-zinc-400">
-            Every design or plan GhostOps has certified, newest first. A certificate is the signed record of the full
+            Every design or plan SimulaCrum has certified, newest first. A certificate is the signed record of the full
             check: what would change, what is risky, what it costs, and whether it is allowed through.
           </p>
         </div>
@@ -196,14 +196,14 @@ export default function Home() {
             <ErrorState
               title="Could not load certificates"
               detail={state.error}
-              hint="Check that the GhostOps API is running (python -m app.server), then retry."
+              hint="Check that the SimulaCrum API is running (python -m app.server), then retry."
               onRetry={() => void reload()}
             />
           </div>
         ) : rows.length === 0 ? (
           <EmptyState
             title="No Certificates Yet"
-            body="Build a design in the Builder (or load an example) and press Certify. The signed result appears here. Plans from the ghostops CLI show up here too."
+            body="Build a design in the Builder (or load an example) and press Certify. The signed result appears here. Plans checked with the SimulaCrum CLI (ghostops analyze) show up here too."
             action={
               <Link href="/builder" className={`mt-1 ${CERTIFY_LINK}`}>
                 Open Builder <ArrowRight size={14} weight="bold" aria-hidden="true" />

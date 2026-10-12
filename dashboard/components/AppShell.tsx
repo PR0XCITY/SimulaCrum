@@ -59,9 +59,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </a>
       <header className="sticky top-0 z-20 border-b print:hidden border-line bg-canvas/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1400px] items-center gap-3 px-4 sm:gap-8 md:px-6">
-          <Link href="/" className="flex items-center gap-2 text-zinc-100" aria-label="GhostOps home">
+          <Link href="/" className="flex items-center gap-2 text-zinc-100" aria-label="SimulaCrum home">
             <ShieldCheckered size={20} weight="duotone" className="text-cyan-400" aria-hidden="true" />
-            <span className="hidden font-mono text-sm font-semibold tracking-tight sm:inline" translate="no">ghostops</span>
+            <span className="hidden font-mono text-sm font-semibold tracking-tight sm:inline" translate="no">SimulaCrum</span>
           </Link>
           <nav className="flex items-center gap-1" aria-label="Main">
             {NAV.map((item) => {
@@ -88,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {mode === "checking" && waking && (
         <div className="border-b border-line bg-surface print:hidden" role="status">
           <p className="mx-auto max-w-[1400px] px-4 py-2 text-xs text-zinc-400 md:px-6">
-            Waking up the GhostOps API at <span className="font-mono" translate="no">{API_BASE}</span>. Free hosting
+            Waking up the SimulaCrum API at <span className="font-mono" translate="no">{API_BASE}</span>. Free hosting
             puts it to sleep when idle, so the first visit can take up to a minute.
           </p>
         </div>
@@ -96,7 +96,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {mode === "demo" && (
         <div className="border-b border-amber-400/20 bg-amber-400/[0.06] print:hidden">
           <p className="mx-auto max-w-[1400px] px-4 py-2 text-xs text-amber-200/90 md:px-6">
-            Demo mode: the GhostOps API at <span className="font-mono" translate="no">{API_BASE}</span> is unreachable,
+            Demo mode: the SimulaCrum API at <span className="font-mono" translate="no">{API_BASE}</span> is unreachable,
             so these are bundled sample certificates.{" "}
             {API_IS_LOCAL ? (
               <>Start it with <span className="font-mono" translate="no">python -m app.server</span>.</>

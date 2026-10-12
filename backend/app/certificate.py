@@ -341,7 +341,7 @@ def cost_section(plan: dict[str, Any], result: dict[str, Any] | None = None, *, 
         except InfracostAuthError as exc:
             if hosted():  # no interactive login on a server: say so instead of giving login steps
                 return {"monthly_usd": None, "note": "Cost not estimated: Infracost is not available on "
-                        "a hosted GhostOps (it has only an interactive browser login)."}, []
+                        "a hosted SimulaCrum (it has only an interactive browser login)."}, []
             return {"monthly_usd": None, "note": f"Cost not estimated: {exc}"}, []
         except CostError as exc:
             return {"monthly_usd": None, "note": f"Cost not estimated: {exc}"}, []
@@ -472,12 +472,12 @@ def template_explain(flags: list[dict[str, str]], shadow: dict[str, Any], cost: 
     named = "; ".join(titles[:3]) + ("; and others" if len(titles) > 3 else "")
     if verdict == BLOCKED:
         counts = {s: sum(f["severity"] == s for f in blocking) for s in ("CRITICAL", "HIGH")}
-        first = (f"GhostOps blocked this change for human review: it has {counts['CRITICAL']} critical and "
+        first = (f"SimulaCrum blocked this change for human review: it has {counts['CRITICAL']} critical and "
                  f"{counts['HIGH']} high-severity blocking findings ({named})." if blocking else
-                 "GhostOps blocked this change for human review because it could not be verified.")
+                 "SimulaCrum blocked this change for human review because it could not be verified.")
     else:
         warns = [f for f in flags if not blocks(f)]
-        first = (f"GhostOps auto-approved this change of {change_count} resource(s): no critical or high-severity "
+        first = (f"SimulaCrum auto-approved this change of {change_count} resource(s): no critical or high-severity "
                  "security findings" + (f", only {len(warns)} advisory finding(s) ({named})." if warns else "."))
     second = (f"It applied cleanly on the MiniStack emulator ({shadow['resources_created']} resources)."
               if shadow["applied"] else

@@ -317,7 +317,7 @@ def test_groq_failure_falls_back_to_template(monkeypatch, failure):
     cert = build_certificate(load("bad_plan.json"), shadow_result=shadow_ok(8), cost_result=cost_result(23.832),
                              secret=SECRET, now=NOW)
     assert cert["generated_by"] == "template"
-    assert cert["risk_explanation"].startswith("GhostOps blocked this change for human review: it has 3 critical")
+    assert cert["risk_explanation"].startswith("SimulaCrum blocked this change for human review: it has 3 critical")
     assert "Estimated monthly cost change: +$23.83." in cert["risk_explanation"]
     assert verify(cert, secret=SECRET)
 
@@ -325,7 +325,7 @@ def test_groq_failure_falls_back_to_template(monkeypatch, failure):
 def test_template_for_approved_change():
     cert = make("good_plan.json", shadow=shadow_ok(2), cost=cost_result(0.1))
     assert cert["risk_explanation"] == (
-        "GhostOps auto-approved this change of 2 resource(s): no critical or high-severity security findings, "
+        "SimulaCrum auto-approved this change of 2 resource(s): no critical or high-severity security findings, "
         "only 2 advisory finding(s) (S3 bucket has no versioning; S3 bucket has no encryption configuration in code). "
         "It applied cleanly on the MiniStack emulator (2 resources). Estimated monthly cost change: +$0.10.")
 
@@ -417,7 +417,7 @@ def test_over_budget_blocks_an_otherwise_clean_change():
     assert budget["remediation"]["config_change"] == []
     assert cert["verdict"] == BLOCKED
     assert cert["pillars"]["cost"]["score"] == 75
-    assert cert["risk_explanation"].startswith("GhostOps blocked this change for human review: it has 0 critical "
+    assert cert["risk_explanation"].startswith("SimulaCrum blocked this change for human review: it has 0 critical "
                                                "and 1 high-severity blocking findings (Monthly cost increase is over budget)")
 
 
