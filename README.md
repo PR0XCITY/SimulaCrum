@@ -1,7 +1,7 @@
 # SimulaCrum
 
 **A safety layer between an AI coding agent and a real cloud account.**
-GhostOps takes a Terraform plan, checks it for security and cost risk, replays it on a free
+SimulaCrum takes a Terraform plan, checks it for security and cost risk, replays it on a free
 local AWS emulator, and issues a signed **Risk Certificate**. Low-risk changes are
 auto-approved; anything risky is blocked until a human approves or denies it.
 
@@ -21,14 +21,14 @@ Terraform change can open SSH to the whole internet, grant `Action: "*"` on `Res
 make a bucket public, or quietly add monthly cost, and `terraform plan` output is long enough
 that a tired human skims past it. Asking the agent "is this safe?" is not a control.
 
-GhostOps puts a deterministic, auditable gate in that path: every plan gets the same checks,
+SimulaCrum puts a deterministic, auditable gate in that path: every plan gets the same checks,
 the result is a tamper-evident certificate, and a human decides whenever the risk is real.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    agent["AI agent / engineer<br/>terraform plan + show -json"] --> api["GhostOps API<br/>FastAPI · CLI"]
+    agent["AI agent / engineer<br/>terraform plan + show -json"] --> api["SimulaCrum API<br/>FastAPI · CLI"]
 
     subgraph analysis["Analysis of one plan"]
         parser["Plan parser<br/>normalise resource changes"]
@@ -63,11 +63,11 @@ flowchart LR
 | Blast radius (`app/blast_radius.py`) | Builds before/after resource graphs (references + matching ids/ARNs) and reports what becomes reachable from `0.0.0.0/0` and which IAM permissions widen. |
 | Shadow run (`app/shadow.py`) | Copies the Terraform directory, forces the AWS provider onto MiniStack with fake keys (override file + scrubbed environment), applies on a freshly reset MiniStack, records the resulting resources, resets again. |
 | Cost delta (`app/cost.py`) | Prices the before and after states with Infracost and reports the monthly change per resource. Anything it cannot price is `null` with a reason, never a guess. |
-| Certificate (`app/certificate.py`) | Combines everything, decides the verdict, gets an explanation from Groq (sanitized input, template fallback) and signs it with Ed25519 (`GHOSTOPS_SIGNING_KEY`; HMAC-SHA256 if only `GHOSTOPS_HMAC_SECRET` is set). |
+| Certificate (`app/certificate.py`) | Combines everything, decides the verdict, gets an explanation from Groq (sanitized input, template fallback) and signs it with Ed25519 (`SimulaCrum_SIGNING_KEY`; HMAC-SHA256 if only `SimulaCrum_HMAC_SECRET` is set). |
 | Remediation (`app/remediation.py`) | Every flag gets a fix. The config change is chosen by deterministic rules, never by the LLM; Groq only words the sentence, from sanitized input, with a template fallback. |
 | Catalog + generator (`app/catalog.py`, `app/generator.py`) | Nine AWS services (EC2, S3, RDS, VPC, IAM, Lambda, DynamoDB, CloudWatch alarm, ALB) with typed, validated options and optional usage inputs, turned into Terraform that targets MiniStack. |
 | Architectures (`app/architecture.py`) | Runs the generated Terraform through the same pipeline: `terraform plan` locally, then the checks above. |
-| API, CLI, dashboard | `python -m app.server`, `ghostops analyze <plan.json>`, and the Next.js dashboard in `dashboard/`. |
+| API, CLI, dashboard | `python -m app.server`, `SimulaCrum analyze <plan.json>`, and the Next.js dashboard in `dashboard/`. |
 
 ### Rules that exist today
 
@@ -98,7 +98,7 @@ Every rule belongs to one pillar. Each finding comes with a fix (a catalog field
 | GO-PERF-001 | performance | LOW | Lambda at the 128 MB minimum (CPU scales with memory) |
 | GO-PERF-002 | performance | MEDIUM | Lambda timeout at the 900 s maximum, so effectively no limit |
 | GO-PERF-003 | performance | MEDIUM | DynamoDB `PROVISIONED` capacity with no `aws_appautoscaling_target` |
-| GO-BUDGET-001 | cost | HIGH (blocks) | the monthly cost increase is above `GHOSTOPS_MONTHLY_BUDGET_USD` (default 500; `off` disables it). Checked in Python after Infracost, not in OPA; an unknown cost never triggers it |
+| GO-BUDGET-001 | cost | HIGH (blocks) | the monthly cost increase is above `SimulaCrum_MONTHLY_BUDGET_USD` (default 500; `off` disables it). Checked in Python after Infracost, not in OPA; an unknown cost never triggers it |
 
 **Verdict:** a CRITICAL or HIGH finding of the **security** pillar, a monthly cost increase over
 the budget (GO-BUDGET-001), or a shadow apply that did not succeed, means
@@ -152,7 +152,7 @@ Other principles that follow from it:
   titles, resource types, severities and the verdict, never names, values, ARNs or costs.
 - **Tamper-evident, publicly verifiable.** The certificate is signed with Ed25519 over every
   field; editing any value breaks `GET /verify/{plan_id}`. Anyone can check it offline with the
-  public key from `GET /public-key`, while only GhostOps holds the private key (see
+  public key from `GET /public-key`, while only SimulaCrum holds the private key (see
   [Verifying a certificate](#verifying-a-certificate-without-any-secret)). Reviewer decisions go to an append-only audit log and are never
   applied to any system.
 
@@ -299,17 +299,17 @@ Open a **new** terminal after installing tools so PATH is refreshed.
 ### Setup (once)
 
 ```powershell
-git clone https://github.com/PR0XCITY/GhostOps.git
-cd GhostOps
+git clone https://github.com/PR0XCITY/SimulaCrum.git
+cd SimulaCrum
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -e "backend[test]"
 npm --prefix dashboard install
 
 copy .env.example .env
-# create a signing key and paste the GHOSTOPS_SIGNING_KEY=... line it prints into .env yourself:
+# create a signing key and paste the SimulaCrum_SIGNING_KEY=... line it prints into .env yourself:
 .venv\Scripts\python.exe -m app.keys generate
 # optional, only to keep verifying certificates signed before Ed25519 (HMAC-SHA256):
-python -c "import secrets; print('GHOSTOPS_HMAC_SECRET=' + secrets.token_hex(32))"
+python -c "import secrets; print('SimulaCrum_HMAC_SECRET=' + secrets.token_hex(32))"
 # optional: add GROQ_API_KEY to .env, then log in to Infracost:
 infracost auth login
 ```
@@ -322,20 +322,20 @@ note. Without a Groq key, the explanation uses a template.
 New certificates carry `"signature_alg": "ed25519"` and a hex Ed25519 signature over
 `plan_id + "\n" + canonical JSON` (sorted keys, no whitespace) of every other field,
 `signature_alg` included, so the algorithm cannot be swapped. Only the holder of
-`GHOSTOPS_SIGNING_KEY` can sign; anyone with the public key can verify:
+`SimulaCrum_SIGNING_KEY` can sign; anyone with the public key can verify:
 
 ```powershell
-curl.exe -s http://127.0.0.1:8000/public-key -o ghostops-pub.json
+curl.exe -s http://127.0.0.1:8000/public-key -o SimulaCrum-pub.json
 curl.exe -s http://127.0.0.1:8000/certificates/<plan_id> -o cert.json
-.venv\Scripts\python.exe scripts\verify_certificate.py cert.json ghostops-pub.json --plan plan.json
+.venv\Scripts\python.exe scripts\verify_certificate.py cert.json SimulaCrum-pub.json --plan plan.json
 ```
 
 The script needs only the `cryptography` package and exits 0 (valid), 1 (invalid: tampered,
 wrong key, other plan, or HMAC-signed) or 2 (unreadable input). `python -m app.keys public`
 prints the public key of the configured key. Certificates from before Ed25519 have no
 `signature_alg` and are HMAC-SHA256: `GET /verify/{plan_id}` still accepts them as long as
-`GHOSTOPS_HMAC_SECRET` is set, but only the server can check those. Without
-`GHOSTOPS_SIGNING_KEY`, GhostOps falls back to signing with HMAC-SHA256 and `/public-key`
+`SimulaCrum_HMAC_SECRET` is set, but only the server can check those. Without
+`SimulaCrum_SIGNING_KEY`, SimulaCrum falls back to signing with HMAC-SHA256 and `/public-key`
 returns 404.
 
 ### Run the demo (one command)
@@ -354,9 +354,9 @@ http://127.0.0.1:8000 and the dashboard on http://localhost:3000, then runs both
 Real output from a cold start:
 
 ```text
-[ghostops] demo/bad: BLOCKED_PENDING_REVIEW (as expected) in 116s | flags {'CRITICAL': 3, 'HIGH': 5, 'MEDIUM': 0} | shadow applied=True | cost +23.83 USD/month | explanation by groq
-[ghostops] demo/good: AUTO_APPROVED (as expected) in 37s | flags {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0} | shadow applied=True | cost +0.10 USD/month | explanation by groq
-[ghostops] all demos behaved as expected
+[SimulaCrum] demo/bad: BLOCKED_PENDING_REVIEW (as expected) in 116s | flags {'CRITICAL': 3, 'HIGH': 5, 'MEDIUM': 0} | shadow applied=True | cost +23.83 USD/month | explanation by groq
+[SimulaCrum] demo/good: AUTO_APPROVED (as expected) in 37s | flags {'CRITICAL': 0, 'HIGH': 0, 'MEDIUM': 0} | shadow applied=True | cost +0.10 USD/month | explanation by groq
+[SimulaCrum] all demos behaved as expected
 ```
 
 Services keep running until Ctrl+C. Use `--exit` to stop after the demos, `--no-groq` for
@@ -367,7 +367,7 @@ template explanations. Logs are written to `logs/`.
 ```powershell
 terraform plan -out tf.plan
 terraform show -json tf.plan | Out-File -Encoding utf8 plan.json
-.venv\Scripts\ghostops.exe analyze plan.json --tf .
+.venv\Scripts\SimulaCrum.exe analyze plan.json --tf .
 ```
 
 Exit code 0 = auto-approved, 1 = blocked, 2 = error. The same works through the API
@@ -418,13 +418,13 @@ ALL CHECKS PASSED
 
 ## Gating agents and pull requests
 
-A dashboard only helps if someone looks at it. These pieces put GhostOps *in the path*, so a
+A dashboard only helps if someone looks at it. These pieces put SimulaCrum *in the path*, so a
 risky plan cannot be merged or applied without a human decision. All of them only ever talk
-to MiniStack with fake keys; none of them gives GhostOps real AWS credentials.
+to MiniStack with fake keys; none of them gives SimulaCrum real AWS credentials.
 
 | Gate | Where | What it blocks |
 |---|---|---|
-| CI gate | [`.github/workflows/ghostops-gate.yml`](.github/workflows/ghostops-gate.yml) + [`.github/actions/ghostops-gate`](.github/actions/ghostops-gate/action.yml) | Merging a pull request whose Terraform is `BLOCKED_PENDING_REVIEW` |
+| CI gate | [`.github/workflows/SimulaCrum-gate.yml`](.github/workflows/SimulaCrum-gate.yml) + [`.github/actions/SimulaCrum-gate`](.github/actions/SimulaCrum-gate/action.yml) | Merging a pull request whose Terraform is `BLOCKED_PENDING_REVIEW` |
 | Agent gate | MCP server `python -m app.mcp_gate` ([`backend/app/mcp_gate.py`](backend/app/mcp_gate.py)) | An AI agent applying a plan without an approved certificate |
 | Pre-apply wrapper | [`scripts/safe-apply.ps1`](scripts/safe-apply.ps1) | `terraform apply` of a plan that is blocked and not approved (demos only) |
 
@@ -442,33 +442,33 @@ Call the reusable workflow from your repository, once per Terraform directory:
 # .github/workflows/infra.yml in your repository
 on: pull_request
 jobs:
-  ghostops:
-    uses: PR0XCITY/GhostOps/.github/workflows/ghostops-gate.yml@main
+  SimulaCrum:
+    uses: PR0XCITY/SimulaCrum/.github/workflows/SimulaCrum-gate.yml@main
     with:
       tf_dir: infra/network
     secrets:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}                  # optional
-      GHOSTOPS_SIGNING_KEY: ${{ secrets.GHOSTOPS_SIGNING_KEY }}  # optional, Ed25519
+      SimulaCrum_SIGNING_KEY: ${{ secrets.SimulaCrum_SIGNING_KEY }}  # optional, Ed25519
 ```
 
 The job starts a `ministackorg/ministack` service container, installs Terraform 1.16.4 and
 OPA 1.21.1 (pinned, SHA-256 checked, the same as the Dockerfile), runs `terraform init/plan`
 and `show -json` in a scrubbed copy of `tf_dir` with every AWS endpoint forced onto MiniStack,
-then runs `ghostops analyze` (full pipeline, shadow apply included). It **fails when the verdict
+then runs `SimulaCrum analyze` (full pipeline, shadow apply included). It **fails when the verdict
 is `BLOCKED_PENDING_REVIEW`** (or on any error), writes a job summary with the verdict, the
 blocking findings, the pillar scores and the cost, and uploads the certificate JSON as an
 artifact. Make the job a required status check in branch protection to stop the merge.
 
 - Infracost has no API key (OAuth login only), so CI reports the cost as unknown; the budget
   gate never fires on an unknown cost.
-- With `GHOSTOPS_SIGNING_KEY` (Ed25519) the uploaded certificate can be checked later by anyone
-  with the public key. Without it (or `GHOSTOPS_HMAC_SECRET`) each run signs with a random
+- With `SimulaCrum_SIGNING_KEY` (Ed25519) the uploaded certificate can be checked later by anyone
+  with the public key. Without it (or `SimulaCrum_HMAC_SECRET`) each run signs with a random
   per-run HMAC secret: the summary and the verdict are still right, but the certificate
   cannot be verified afterwards.
 - A blocked PR is reviewed like any other code: fix the findings, or a maintainer overrides
   the required check deliberately. The CI gate does not read the local audit log.
 
-This repository gates itself with [`ghostops-pr.yml`](.github/workflows/ghostops-pr.yml):
+This repository gates itself with [`SimulaCrum-pr.yml`](.github/workflows/SimulaCrum-pr.yml):
 `demo/good` must pass as a normal gate, and `demo/bad` runs with `expect:
 BLOCKED_PENDING_REVIEW` as a self-test proving the gate still blocks. The same runner works
 locally (MiniStack running):
@@ -485,10 +485,10 @@ cd backend
 
 | Tool | Returns |
 |---|---|
-| `ghostops_check_plan(plan_json_path, tf_dir)` | `verdict`, `certificate_id`, `blocking_findings`, `pillar_scores`, cost, `apply_allowed`, `reason`, `dashboard_url` |
-| `ghostops_get_certificate(plan_id)` | the same for a stored certificate, with its current review state |
+| `SimulaCrum_check_plan(plan_json_path, tf_dir)` | `verdict`, `certificate_id`, `blocking_findings`, `pillar_scores`, cost, `apply_allowed`, `reason`, `dashboard_url` |
+| `SimulaCrum_get_certificate(plan_id)` | the same for a stored certificate, with its current review state |
 
-It uses the local API (`GHOSTOPS_API_URL`, default `http://127.0.0.1:8000`) when it is running,
+It uses the local API (`SimulaCrum_API_URL`, default `http://127.0.0.1:8000`) when it is running,
 otherwise the same pipeline and database in-process, so certificates show up in the dashboard
 either way. A plan that already has a certificate is not re-analysed (that would sign a new
 version and orphan its review). Errors are returned as tool errors that say not to apply.
@@ -498,8 +498,8 @@ Register it with Claude Code (or any MCP client) in the project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "ghostops": {
-      "command": "D:\\Projects\\GhostOps\\.venv\\Scripts\\python.exe",
+    "SimulaCrum": {
+      "command": "D:\\Projects\\SimulaCrum\\.venv\\Scripts\\python.exe",
       "args": ["-m", "app.mcp_gate"]
     }
   }
@@ -508,7 +508,7 @@ Register it with Claude Code (or any MCP client) in the project's `.mcp.json`:
 
 and tell the agent, for example in its instructions file: *Never run `terraform apply`
 directly. Run `terraform plan -out tf.plan` and `terraform show -json tf.plan > plan.json`,
-call `ghostops_check_plan`, and apply only that saved plan, only if `apply_allowed` is true.
+call `SimulaCrum_check_plan`, and apply only that saved plan, only if `apply_allowed` is true.
 If it is blocked, stop and give me the `dashboard_url`.* The server sends the same rule as its
 MCP `instructions`. An instruction is not enforcement on its own: pair it with a permission
 rule that denies the agent `terraform apply` and lets it run `scripts/safe-apply.ps1` instead.
@@ -525,27 +525,27 @@ powershell -ExecutionPolicy Bypass -File scripts\safe-apply.ps1 -TfDir demo\bad 
 It refuses any directory outside this repository's `demo\` folder and any MiniStack endpoint
 that is not on loopback, removes every `AWS_*` variable, writes the MiniStack override file,
 makes a **saved** plan, certifies `terraform show -json` of that file and applies that same
-file only on an allowed decision. A refused plan is kept in `.ghostops-apply\` for `-Resume`.
+file only on an allowed decision. A refused plan is kept in `.SimulaCrum-apply\` for `-Resume`.
 Every certification resets MiniStack (the shadow run), so demo applies are short-lived.
 
 **This wrapper is a demonstration for MiniStack only.** Pointing the idea at a real cloud
 account needs your own review: real credentials handling, who may approve, where the audit
-log lives, and that the guards cannot be bypassed. GhostOps never applies anything itself.
+log lives, and that the guards cannot be bypassed. SimulaCrum never applies anything itself.
 
 ## Deploying (Vercel + Render)
 
-GhostOps is built as a local tool. It can also run online: the dashboard on Vercel and the API
-plus MiniStack on Render. **Never give a hosted GhostOps real AWS credentials.** It only needs
+SimulaCrum is built as a local tool. It can also run online: the dashboard on Vercel and the API
+plus MiniStack on Render. **Never give a hosted SimulaCrum real AWS credentials.** It only needs
 MiniStack, uses hard-coded fake keys for it, and removes every `AWS_*` variable from its
 Terraform runs.
 
 ### Hosted mode
 
-The image sets `GHOSTOPS_HOSTED=1`, and the API will not listen on anything other than
+The image sets `SimulaCrum_HOSTED=1`, and the API will not listen on anything other than
 127.0.0.1 unless this is set. In hosted mode:
 
-- every `POST`, `PUT` and `DELETE` needs the header `X-GhostOps-Key` with the value of
-  `GHOSTOPS_API_KEY` (at least 24 characters). Without it, or with the wrong value, the API
+- every `POST`, `PUT` and `DELETE` needs the header `X-SimulaCrum-Key` with the value of
+  `SimulaCrum_API_KEY` (at least 24 characters). Without it, or with the wrong value, the API
   returns `401`, and it will not start if the key is missing;
 - `POST /analyze` refuses `plan_path` and `tf_dir` with `403`, so a caller cannot make the
   server read its own files. Upload the plan JSON instead. Without `tf_dir` no shadow run
@@ -554,28 +554,28 @@ The image sets `GHOSTOPS_HOSTED=1`, and the API will not listen on anything othe
 - `GET` endpoints stay open: anyone with the URL can read the stored certificates and the
   audit log.
 
-CORS always allows `http://localhost:3000`. Add your Vercel URL with `GHOSTOPS_CORS_ORIGINS`
+CORS always allows `http://localhost:3000`. Add your Vercel URL with `SimulaCrum_CORS_ORIGINS`
 (comma-separated, exact `https://` origins; `*` is ignored).
 
 ### API on Render
 
 1. Push the repository to GitHub. In Render, choose **New > Blueprint** and pick the repo.
    [`render.yaml`](render.yaml) creates two services:
-   - `ghostops-api`: a Docker web service built from [`backend/Dockerfile`](backend/Dockerfile)
+   - `SimulaCrum-api`: a Docker web service built from [`backend/Dockerfile`](backend/Dockerfile)
      (Python 3.13, Terraform 1.16.4 and OPA 1.21.1 with pinned SHA-256 checksums, AWS
      provider pre-cached);
-   - `ghostops-ministack`: a private service running `ministackorg/ministack` on port 4566.
+   - `SimulaCrum-ministack`: a private service running `ministackorg/ministack` on port 4566.
      It is reachable only from the API, and `MINISTACK_ENDPOINT_URL` is wired to it.
 2. Render asks for the values marked `sync: false`. Enter them in Render's dashboard and never
    commit them:
-   - `GHOSTOPS_SIGNING_KEY`: run `python -m app.keys generate` locally and paste only the
-     value after `GHOSTOPS_SIGNING_KEY=`
-   - `GHOSTOPS_HMAC_SECRET`: optional, only to verify older HMAC certificates;
+   - `SimulaCrum_SIGNING_KEY`: run `python -m app.keys generate` locally and paste only the
+     value after `SimulaCrum_SIGNING_KEY=`
+   - `SimulaCrum_HMAC_SECRET`: optional, only to verify older HMAC certificates;
      `python -c "import secrets; print(secrets.token_hex(32))"`
-   - `GHOSTOPS_API_KEY`: generate one the same way
+   - `SimulaCrum_API_KEY`: generate one the same way
    - `GROQ_API_KEY`: optional; without it the explanations use the built-in template
-   - `GHOSTOPS_CORS_ORIGINS`: your Vercel URL, for example `https://ghostops.vercel.app`
-   - `GHOSTOPS_DATABASE_URL`: a free Postgres URL, so certificates survive restarts (see
+   - `SimulaCrum_CORS_ORIGINS`: your Vercel URL, for example `https://SimulaCrum.vercel.app`
+   - `SimulaCrum_DATABASE_URL`: a free Postgres URL, so certificates survive restarts (see
      [Keeping certificates](#keeping-certificates-free-postgres-on-neon) below). Leave it
      empty to use SQLite, which the free plan wipes on every restart.
 3. When the deploy is live, `https://<your-service>.onrender.com/health` returns
@@ -584,16 +584,16 @@ CORS always allows `http://localhost:3000`. Add your Vercel URL with `GHOSTOPS_C
 To try the image locally first (Docker Desktop):
 
 ```powershell
-docker build -f backend/Dockerfile -t ghostops-api .
-$env:GHOSTOPS_API_KEY = python -c "import secrets; print(secrets.token_hex(32))"
-docker run --rm -p 127.0.0.1:8000:8000 --env-file .env -e GHOSTOPS_API_KEY -e MINISTACK_ENDPOINT_URL=http://host.docker.internal:4566 ghostops-api
+docker build -f backend/Dockerfile -t SimulaCrum-api .
+$env:SimulaCrum_API_KEY = python -c "import secrets; print(secrets.token_hex(32))"
+docker run --rm -p 127.0.0.1:8000:8000 --env-file .env -e SimulaCrum_API_KEY -e MINISTACK_ENDPOINT_URL=http://host.docker.internal:4566 SimulaCrum-api
 ```
 
 ### Keeping certificates (free Postgres on Neon)
 
 On Render's free plan the container's disk is temporary, so the SQLite file (certificates,
 audit log, compare slots) is erased on every deploy, restart and spin-down. Set
-`GHOSTOPS_DATABASE_URL` and GhostOps stores everything in Postgres instead. Neon's free tier
+`SimulaCrum_DATABASE_URL` and SimulaCrum stores everything in Postgres instead. Neon's free tier
 is enough and needs no card:
 
 1. Sign up at [neon.tech](https://neon.tech) and create a project (pick a region near
@@ -602,18 +602,18 @@ is enough and needs no card:
 2. On the project dashboard click **Connect** and copy the connection string. It looks like
    `postgresql://USER:PASSWORD@ep-...neon.tech/neondb?sslmode=require`. Keep `sslmode=require`.
    Either the direct or the pooled (`-pooler`) host works.
-3. In Render, open `ghostops-api` > **Environment**, set `GHOSTOPS_DATABASE_URL` to that
+3. In Render, open `SimulaCrum-api` > **Environment**, set `SimulaCrum_DATABASE_URL` to that
    string and save (Render redeploys). It is a secret: it contains the database password, so
    never commit it or paste it anywhere public. `render.yaml` lists it with `sync: false`.
-4. The deploy log shows `GhostOps storage: postgres`. The tables, and the triggers that keep
+4. The deploy log shows `SimulaCrum storage: postgres`. The tables, and the triggers that keep
    the audit log append-only (`UPDATE`, `DELETE` and `TRUNCATE` are rejected), are created on
    startup. Certify something, restart the service (**Manual Deploy > Restart service**) and
    the certificate is still listed.
 
 The URL never appears in logs or error messages. If the database cannot be reached, the API
-exits at startup with `cannot use the database in GHOSTOPS_DATABASE_URL` and the reason.
+exits at startup with `cannot use the database in SimulaCrum_DATABASE_URL` and the reason.
 A free Neon database also sleeps when idle; the first request after a pause takes a second or
-two longer. Locally, leave `GHOSTOPS_DATABASE_URL` empty to keep using `data/ghostops.db`.
+two longer. Locally, leave `SimulaCrum_DATABASE_URL` empty to keep using `data/SimulaCrum.db`.
 
 To run the store and API tests against Postgres as well, point `TEST_DATABASE_URL` at a
 throwaway database (each test uses its own schema and drops it). Without it those cases are
@@ -629,16 +629,16 @@ $env:TEST_DATABASE_URL = "<a throwaway Postgres URL>"
 1. **Add New > Project**, import the repo, set **Root Directory** to `dashboard`. The
    framework (Next.js) is detected automatically.
 2. Environment variables:
-   - `NEXT_PUBLIC_GHOSTOPS_API` = `https://<your-service>.onrender.com`
-   - `NEXT_PUBLIC_GHOSTOPS_API_KEY` = the same value as `GHOSTOPS_API_KEY` on Render
-3. Deploy, then put the Vercel URL in `GHOSTOPS_CORS_ORIGINS` on Render.
+   - `NEXT_PUBLIC_SimulaCrum_API` = `https://<your-service>.onrender.com`
+   - `NEXT_PUBLIC_SimulaCrum_API_KEY` = the same value as `SimulaCrum_API_KEY` on Render
+3. Deploy, then put the Vercel URL in `SimulaCrum_CORS_ORIGINS` on Render.
 
-Without `NEXT_PUBLIC_GHOSTOPS_API`, or while the API is unreachable, the dashboard runs in
+Without `NEXT_PUBLIC_SimulaCrum_API`, or while the API is unreachable, the dashboard runs in
 demo mode with the sample certificates.
 
 **A key in a browser is a speed bump, not authentication.** Every `NEXT_PUBLIC_*` value is
 compiled into the JavaScript that Vercel serves, so anyone who opens the dashboard can read
-`NEXT_PUBLIC_GHOSTOPS_API_KEY` and call the API with it. It stops random scanners and drive-by
+`NEXT_PUBLIC_SimulaCrum_API_KEY` and call the API with it. It stops random scanners and drive-by
 requests, nothing more. For real access control, put the dashboard behind Vercel's
 deployment protection and keep the key private, or add proper user login. Rotate the key
 (change it on Render and Vercel, then redeploy both) if it is abused.
@@ -647,12 +647,12 @@ deployment protection and keep the key private, or add proper user login. Rotate
 
 - **RAM.** Render's free plan has 512 MB. Terraform with the AWS provider can use several
   hundred MB during a plan, so a full analysis may be killed for running out of memory. If that
-  happens, use the Standard plan (2 GB) for `ghostops-api`.
+  happens, use the Standard plan (2 GB) for `SimulaCrum-api`.
 - **Private services are paid.** Render does not offer private services on the free plan, so
   MiniStack needs at least the Starter plan. Without MiniStack, shadow runs fail and every
   certificate is blocked (fail closed).
-- **SQLite is temporary.** Without `GHOSTOPS_DATABASE_URL`, certificates, the audit log and
-  the compare slots are stored in `/app/data/ghostops.db` inside the container, which is erased
+- **SQLite is temporary.** Without `SimulaCrum_DATABASE_URL`, certificates, the audit log and
+  the compare slots are stored in `/app/data/SimulaCrum.db` inside the container, which is erased
   on every deploy, restart and free-plan spin-down. Use a free Neon database
   ([Keeping certificates](#keeping-certificates-free-postgres-on-neon)) or a paid Render disk
   at `/app/data`.
@@ -673,7 +673,7 @@ deployment protection and keep the key private, or add proper user login. Rotate
 - **Pillar scores are a heuristic.** Penalties are fixed per severity, so ten LOW findings weigh
   as much as one CRITICAL plus one MEDIUM, and the score says nothing about findings no rule
   covers. "Oversized EC2" relies on the stated CPU usage, not measured metrics.
-- **Only the rules listed above exist.** GhostOps does not yet check KMS policies, Lambda URLs,
+- **Only the rules listed above exist.** SimulaCrum does not yet check KMS policies, Lambda URLs,
   public RDS snapshots, EKS, CloudFront, IAM trust policies (who can assume a role), S3 bucket
   ACL grants to specific users, `NotAction` in OPA rules, and much more. "No findings" means
   "none of these rules fired", not "safe".
@@ -694,9 +694,9 @@ deployment protection and keep the key private, or add proper user login. Rotate
   [Deploying](#deploying-vercel--render)) adds a shared API key and turns off server paths,
   but it has no user accounts and anyone can read the certificates.
 - **One signing key, no rotation story.** Certificates do not name the key that signed them;
-  after changing `GHOSTOPS_SIGNING_KEY`, older Ed25519 certificates verify only against the old
+  after changing `SimulaCrum_SIGNING_KEY`, older Ed25519 certificates verify only against the old
   public key (keep it to check them with the script). Older HMAC certificates still rely on a
-  shared secret: anyone holding `GHOSTOPS_HMAC_SECRET` could forge one of those.
+  shared secret: anyone holding `SimulaCrum_HMAC_SECRET` could forge one of those.
 
 ## Future work
 
@@ -716,7 +716,7 @@ deployment protection and keep the key private, or add proper user login. Rotate
 backend/            FastAPI service, analysis pipeline, Rego rules, tests
   app/              plan_parser, policy_engine, blast_radius, shadow, cost, certificate,
                     remediation, catalog, generator, architecture, api, store, cli
-  rules/ghostops/   Rego v1 policies (see rules/README.md)
+  rules/SimulaCrum/   Rego v1 policies (see rules/README.md)
   tests/            pytest suite, Rego unit tests, plan JSON fixtures
 dashboard/          Next.js 16 + TypeScript + Tailwind v4 dashboard (Certificates, Builder, report)
 demo/               bad and good Terraform demos, fixture generator, sample certificates
