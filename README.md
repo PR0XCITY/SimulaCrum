@@ -1,4 +1,4 @@
-# GhostOps
+# SimulaCrum
 
 **A safety layer between an AI coding agent and a real cloud account.**
 GhostOps takes a Terraform plan, checks it for security and cost risk, replays it on a free
